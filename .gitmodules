@@ -1,0 +1,6 @@
+[submodule "apple-blockchain-gui"]
+	path = apple-blockchain-gui
+	url = https://github.com/Apple-Network/apple-blockchain-gui.git
+[submodule "mozilla-ca"]
+	path = mozilla-ca
+	url = https://github.com/Chia-Network/mozilla-ca.git
