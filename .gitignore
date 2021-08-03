@@ -92,6 +92,7 @@ main.sym
 # React built app
 apple-blockchain-gui/.eslintcache
 apple-blockchain-gui/build
+build
 build_scripts/dist
 build_scripts/*.Dmg
 apple-blockchain-gui/src/locales/_build

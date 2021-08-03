@@ -411,7 +411,7 @@ Batch process weight proof epochs in groups of 900 to fit below May 2020 sqlite 
 
 ### Added
 
-- This is a hard fork/breaking change from RC6/7. TAPPLE Coins will **not** be moved forward but your plots and keys and parts of your configuration do. When you install this version before 10AM PDST on 3/16/2021 it will load up, start finding peers, and otherwise wait for the flag drop at that time to start farming. This is likely to be the last dress rehearsal for mainnet launch. Our [3/15/2021 blog post](https://www.chiaapple.com/2021/03/15/mainnet-update.html) has more details on the current mainnet launch plan.
+- This is a hard fork/breaking change from RC6/7. TAPPLE Coins will **not** be moved forward but your plots and keys and parts of your configuration do. When you install this version before 10AM PDST on 3/16/2021 it will load up, start finding peers, and otherwise wait for the flag drop at that time to start farming. This is likely to be the last dress rehearsal for mainnet launch. Our [3/15/2021 blog post](https://www.applecoin.in/2021/03/15/mainnet-update.html) has more details on the current mainnet launch plan.
 - The GUI now has a tooltip that directs users to the explanation of the plot filter.
 - The GUI now has a tooltip to explain the "Disable bitfield plotting" option. Thanks @shaneo257 for the idea.
 - The GUI now has a tooltip to explain Hierarchical Deterministic keys next to Receive Address on the Wallet page.
@@ -490,8 +490,8 @@ Batch process weight proof epochs in groups of 900 to fit below May 2020 sqlite 
 - When processing mempool transactions, Coin IDs are now calculated from parent coin ID and amount
 - We implemented rate limiting for full node. This can and will lead to short term bans of certain peers that didn't behave in expected ways. This is ok and normal, but strong defense against many DDOS attacks.
 - `requirements-dev.txt` has been removed in favor of the CI actions and test scripts.
-- We have moved to a new and much higher scalability download.chiaapple.com to support the mainnet launch flag and additional download demand.
-- To always get the latest testnet and then mainnet installers you can now use a latest URL: [Windows](https://download.chiaapple.com/latest/Setup-Win64.exe) and [MacOS x86_64](https://download.chiaapple.com/latest/Setup-MacOS.dmg).
+- We have moved to a new and much higher scalability download.applecoin.in to support the mainnet launch flag and additional download demand.
+- To always get the latest testnet and then mainnet installers you can now use a latest URL: [Windows](https://download.applecoin.in/latest/Setup-Win64.exe) and [MacOS x86_64](https://download.applecoin.in/latest/Setup-MacOS.dmg).
 - Apple wheels not on Pypi and some dependecies not found there also are now on pypi.chia.net.
 - Additional typing has been added to the Python code with thanks to @jespino.
 - Cryptography and Keyring have been bumped to their current releases.
@@ -514,7 +514,7 @@ Batch process weight proof epochs in groups of 900 to fit below May 2020 sqlite 
 ### Added
 
 - The RC5 release is a new breaking change/hard fork blockchain. Plots and keys from previous chains will work fine on RC5 but balances of TAPPLE will not come forward.
-- We now support a "green flag" chain launch process. A new version of the software will poll download.chiaapple.com/notify/ for a signed json file that will be the genesis block of the chain for that version. This will allow unattended start at mainnet.
+- We now support a "green flag" chain launch process. A new version of the software will poll download.applecoin.in/notify/ for a signed json file that will be the genesis block of the chain for that version. This will allow unattended start at mainnet.
 - Bluebox Timelords are back. These are Timelords most anyone can run. They search through the historical chain and find large proofs of times and compact them down to their smallest representation. This significantly speeds up syncing for newly started nodes. Currently this is only supported on Linux and MacOS x86_64 but we will expand that. Any desktop or server of any age will be fast enough to be a useful Bluebox Timelord.
 - Thanks to @jespino there is now `apple farm summary`. You can now get almost exactly the same farming information on the CLI as the GUI.
 - We have added Romanian to the GUI translations. Thank you to @bicilis on [Crowdin](https://crowdin.com/project/apple-blockchain). We also added a couple of additional target languages. Klingon anyone?
@@ -545,7 +545,7 @@ Batch process weight proof epochs in groups of 900 to fit below May 2020 sqlite 
 - Nodes that were interrupted by a network crash or standby on a laptop were not syncing upon reconnection in RC4.
 - Sync issues could stop syncing from restarting and could lead to a peer host that you could not remove.
 - Adding Click changed the behavior of `apple keys add -m`. The help now makes it clear that the 24 word mnemonic needs to be surrounded by a pair of quotes.
-- Python root CA certificates have issues so we have added the Mozilla certificate store via curl.se and use that to connect to backup.chiaapple.com via https, for example.
+- Python root CA certificates have issues so we have added the Mozilla certificate store via curl.se and use that to connect to backup.applecoin.in via https, for example.
 - The difficulty adjustment calculation was simplified.
 - All of the apple sub repositories that were attempting to build MacOS Universal wheels were only generating x86_64 wheels internally. We have moved back to only generating x86_64 MacOS wheels on CI.
 - However, we have updated and test compiled all Apple dependencies on Apple Silicon and will be making available a test .dmg for MacOS ARM64 shortly.
@@ -1020,7 +1020,7 @@ all fields that referred to sub blocks are changed to blocks.
 ### Added
 
 - Rate limited wallets can now have unspent and un-spendable funds clawed back by the Admin wallet.
-- You can now backup your wallet related metadata in an encrypted and signed file to a free service from Apple Network at backup.chiaapple.com. Simply having a backup of your private key will allow you to fully restore the state of your wallet including coloured coins, rate limited wallets, distributed identity wallets and many more. Your private key is used to automatically restore the last backup you saved to the Apple backup cloud service. This service is open source and ultimately you will be able to configure your backups to go to backup.chiaapple.com, your own installation, or a third party's version of it.
+- You can now backup your wallet related metadata in an encrypted and signed file to a free service from Apple Network at backup.applecoin.in. Simply having a backup of your private key will allow you to fully restore the state of your wallet including coloured coins, rate limited wallets, distributed identity wallets and many more. Your private key is used to automatically restore the last backup you saved to the Apple backup cloud service. This service is open source and ultimately you will be able to configure your backups to go to backup.applecoin.in, your own installation, or a third party's version of it.
 - Added a Code of Conduct in CODE_OF_CONDUCT.md.
 - Added a bug report template in `.github/ISSUE_TEMPLATE/bug_report.md`.
 
@@ -1608,7 +1608,7 @@ relic. We will make a patch available for these systems shortly.
 ### Added
 
 - This is the first release of the Apple testnet! Blockchain consensus, proof of time, and proof of space are included.
-- More details on the release at [https://www.chiaapple.com/developer/](https://www.chiaapple.com/developer/)
+- More details on the release at [https://www.applecoin.in/developer/](https://www.applecoin.in/developer/)
 
 [unreleased]: https://github.com/Apple-Network/apple-blockchain/compare/1.0beta5...dev
 [1.0beta5]: https://github.com/Apple-Network/apple-blockchain/compare/1.0beta4...1.0beta5

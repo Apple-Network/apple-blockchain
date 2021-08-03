@@ -1,10 +1,10 @@
 from setuptools import setup
 
 dependencies = [
-    "blspy==1.0.4",  # Signature library
+    "blspy==1.0.5",  # Signature library
     "chiavdf==1.0.2",  # timelord and vdf verification
     "chiabip158==1.0",  # bip158-style wallet filters
-    "chiapos==1.0.3",  # proof of space
+    "chiapos==1.0.4",  # proof of space
     "clvm==0.9.7",
     "clvm_rs==0.1.8",
     "clvm_tools==0.4.3",
@@ -42,10 +42,10 @@ dev_dependencies = [
 
 kwargs = dict(
     name="apple-blockchain",
-    author="Mariano Sorgente",
-    author_email="admin@chiaapple.com",
+    author="chiacoin",
+    author_email="team@applecoin.in",
     description="Apple blockchain full node, farmer, timelord, and wallet.",
-    url="https://chiaapple.com/",
+    url="https://applecoin.in/",
     license="Apache License",
     python_requires=">=3.7, <4",
     keywords="apple blockchain node",
@@ -103,7 +103,7 @@ kwargs = dict(
     },
     package_data={
         "apple": ["pyinstaller.spec"],
-        "apple.wallet.puzzles": ["*.clvm", "*.clvm.hex"],
+        "": ["*.clvm", "*.clvm.hex", "*.clib", "*.clinc", "*.clsp"],
         "apple.util": ["initial-*.yaml", "english.txt"],
         "apple.ssl": ["apple_ca.crt", "apple_ca.key", "dst_root_ca.pem"],
         "mozilla-ca": ["cacert.pem"],
