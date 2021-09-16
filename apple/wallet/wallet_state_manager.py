@@ -24,7 +24,7 @@ from apple.protocols.wallet_protocol import PuzzleSolutionResponse, RespondPuzzl
 from apple.types.blockchain_format.coin import Coin
 from apple.types.blockchain_format.program import Program
 from apple.types.blockchain_format.sized_bytes import bytes32
-from apple.types.coin_solution import CoinSolution
+from apple.types.coin_spend import CoinSpend
 from apple.types.full_block import FullBlock
 from apple.types.header_block import HeaderBlock
 from apple.types.mempool_inclusion_status import MempoolInclusionStatus
@@ -61,6 +61,13 @@ from apple.wallet.wallet_transaction_store import WalletTransactionStore
 from apple.wallet.wallet_user_store import WalletUserStore
 from apple.server.server import AppleServer
 from apple.wallet.did_wallet.did_wallet import DIDWallet
+
+
+def get_balance_from_coin_records(coin_records: Set[WalletCoinRecord]) -> uint128:
+    amount: uint128 = uint128(0)
+    for record in coin_records:
+        amount = uint128(amount + record.coin.amount)
+    return uint128(amount)
 
 
 class WalletStateManager:
@@ -499,21 +506,29 @@ class WalletStateManager:
 
         return False
 
+    async def get_confirmed_balance_for_wallet_already_locked(self, wallet_id: int) -> uint128:
+        # This is a workaround to be able to call la locking operation when already locked
+        # for example, in the create method of DID wallet
+        assert self.lock.locked() is False
+        unspent_coin_records = await self.coin_store.get_unspent_coins_for_wallet(wallet_id)
+        return get_balance_from_coin_records(unspent_coin_records)
+
     async def get_confirmed_balance_for_wallet(
         self, wallet_id: int, unspent_coin_records: Optional[Set[WalletCoinRecord]] = None
     ) -> uint128:
         """
         Returns the confirmed balance, including coinbase rewards that are not spendable.
         """
-        # lock only if unspent_coin_records is None
+        # lock only if unspent_coin_records is None.
+        # This API should change so that get_balance_from_coin_records is called for Set[WalletCoinRecord]
+        # and this method is called only for the unspent_coin_records==None case.
         if unspent_coin_records is None:
-            async with self.lock:
-                if unspent_coin_records is None:
-                    unspent_coin_records = await self.coin_store.get_unspent_coins_for_wallet(wallet_id)
-        amount: uint128 = uint128(0)
-        for record in unspent_coin_records:
-            amount = uint128(amount + record.coin.amount)
-        return uint128(amount)
+            unspent_coin_records = await self.get_confirmed_balance_for_wallet_with_lock(wallet_id)
+        return get_balance_from_coin_records(unspent_coin_records)
+
+    async def get_confirmed_balance_for_wallet_with_lock(self, wallet_id: int) -> Set[WalletCoinRecord]:
+        async with self.lock:
+            return await self.coin_store.get_unspent_coins_for_wallet(wallet_id)
 
     async def get_unconfirmed_balance(
         self, wallet_id, unspent_coin_records: Optional[Set[WalletCoinRecord]] = None
@@ -522,6 +537,8 @@ class WalletStateManager:
         Returns the balance, including coinbase rewards that are not spendable, and unconfirmed
         transactions.
         """
+        # This API should change so that get_balance_from_coin_records is called for Set[WalletCoinRecord]
+        # and this method is called only for the unspent_coin_records==None case.
         confirmed = await self.get_confirmed_balance_for_wallet(wallet_id, unspent_coin_records)
         unconfirmed_tx: List[TransactionRecord] = await self.tx_store.get_unconfirmed_for_wallet(wallet_id)
         removal_amount: int = 0
@@ -567,7 +584,7 @@ class WalletStateManager:
         removals: List[Coin],
         additions: List[Coin],
         block: BlockRecord,
-        additional_coin_spends: List[CoinSolution],
+        additional_coin_spends: List[CoinSpend],
     ):
         height: uint32 = block.height
         for coin in additions:
@@ -841,8 +858,6 @@ class WalletStateManager:
         """
         Called from wallet before new transaction is sent to the full_node
         """
-        if self.peak is None or int(time.time()) <= self.constants.INITIAL_FREEZE_END_TIMESTAMP:
-            raise ValueError("Initial Freeze Period")
         # Wallet node will use this queue to retry sending this transaction until full nodes receives it
         await self.tx_store.add_transaction_record(tx_record, False)
         self.tx_pending_changed()
@@ -1213,7 +1228,7 @@ class WalletStateManager:
     def get_peak(self) -> Optional[BlockRecord]:
         return self.blockchain.get_peak()
 
-    async def get_next_interesting_coin_ids(self, spend: CoinSolution, in_transaction: bool) -> List[bytes32]:
+    async def get_next_interesting_coin_ids(self, spend: CoinSpend, in_transaction: bool) -> List[bytes32]:
         pool_wallet_interested: List[bytes32] = PoolWallet.get_next_interesting_coin_ids(spend)
         for coin_id in pool_wallet_interested:
             await self.interested_store.add_interested_coin_id(coin_id, in_transaction)

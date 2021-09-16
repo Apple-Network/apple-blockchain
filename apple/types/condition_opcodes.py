@@ -2,11 +2,8 @@ import enum
 from typing import Any
 
 
-# See apple/wallet/puzzles/condition_codes.clvm
+# See chia/wallet/puzzles/condition_codes.clvm
 class ConditionOpcode(bytes, enum.Enum):
-    # UNKNOWN is ascii "0"
-    UNKNOWN = bytes([48])
-
     # AGG_SIG is ascii "1"
 
     # the conditions below require bls12-381 signatures

@@ -56,7 +56,7 @@ class WSAppleConnection:
 
         peername = self.ws._writer.transport.get_extra_info("peername")
         if peername is None:
-            raise ValueError(f"Was not able to get peername from {self.ws_witer} at {self.peer_host}")
+            raise ValueError(f"Was not able to get peername from {self.peer_host}")
 
         connection_port = peername[1]
         self.peer_port = connection_port
@@ -273,7 +273,7 @@ class WSAppleConnection:
             request_start_t = time.time()
             result = await self.create_request(msg, timeout)
             self.log.debug(
-                f"Time for request {attr_name}: {self.get_peer_info()} = {time.time() - request_start_t}, "
+                f"Time for request {attr_name}: {self.get_peer_logging()} = {time.time() - request_start_t}, "
                 f"None? {result is None}"
             )
             if result is not None:
@@ -468,3 +468,12 @@ class WSAppleConnection:
         connection_host = result[0]
         port = self.peer_server_port if self.peer_server_port is not None else self.peer_port
         return PeerInfo(connection_host, port)
+
+    def get_peer_logging(self) -> PeerInfo:
+        info: Optional[PeerInfo] = self.get_peer_info()
+        if info is None:
+            # in this case, we will use self.peer_host which is friendlier for logging
+            port = self.peer_server_port if self.peer_server_port is not None else self.peer_port
+            return PeerInfo(self.peer_host, port)
+        else:
+            return info

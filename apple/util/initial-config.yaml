@@ -14,18 +14,23 @@ network_overrides: &network_overrides
       GENESIS_CHALLENGE: 7e35d673f1ee96ca5993034cd5a7b1cd7cba51826a99287e9f51e6962c3b7a68
       GENESIS_PRE_FARM_POOL_PUZZLE_HASH: "7417e0f9ad2b186d46c5ad00be271fddcae6461e374213e8862c31a7b79b13d7"
       GENESIS_PRE_FARM_FARMER_PUZZLE_HASH: "7417e0f9ad2b186d46c5ad00be271fddcae6461e374213e8862c31a7b79b13d7"
-    testnet0:
-      MIN_PLOT_SIZE: 18
+    testnet7:
+      DIFFICULTY_CONSTANT_FACTOR: 10052721566054
       GENESIS_CHALLENGE: 50778f48d798ce69594452b69efdd971aeae41140f38675148894b2bbf583d1d
+      GENESIS_PRE_FARM_FARMER_PUZZLE_HASH: 7417e0f9ad2b186d46c5ad00be271fddcae6461e374213e8862c31a7b79b13d7
+      GENESIS_PRE_FARM_POOL_PUZZLE_HASH: 7417e0f9ad2b186d46c5ad00be271fddcae6461e374213e8862c31a7b79b13d7
+      MIN_PLOT_SIZE: 18
       NETWORK_TYPE: 1
-      GENESIS_PRE_FARM_POOL_PUZZLE_HASH: "7417e0f9ad2b186d46c5ad00be271fddcae6461e374213e8862c31a7b79b13d7"
-      GENESIS_PRE_FARM_FARMER_PUZZLE_HASH: "7417e0f9ad2b186d46c5ad00be271fddcae6461e374213e8862c31a7b79b13d7"
+      MEMPOOL_BLOCK_BUFFER: 10
+      EPOCH_BLOCKS: 768
+      DIFFICULTY_STARTING: 30
+      RUST_CONDITION_CHECKER: 0
   config:
     mainnet:
       address_prefix: "apple"
       default_full_node_port: 26666
-    testnet0:
-      address_prefix: "tapple"
+    testnet7:
+      address_prefix: "apple"
       default_full_node_port: 25666
 
 selected_network: &selected_network "mainnet"
@@ -69,7 +74,12 @@ harvester:
   start_rpc_server: True
   rpc_port: 26662
   num_threads: 30
-  plot_loading_frequency_seconds: 120
+  plots_refresh_parameter:
+    interval_seconds: 120 # The interval in seconds to refresh the plot file manager
+    retry_invalid_seconds: 1200 # How long to wait before re-trying plots which failed to load
+    batch_size: 300 # How many plot files the harvester processes before it waits batch_sleep_milliseconds
+    batch_sleep_milliseconds: 1 # Milliseconds the harvester sleeps between batch processing
+
 
   # If True use parallel reads in chiapos
   parallel_read: True

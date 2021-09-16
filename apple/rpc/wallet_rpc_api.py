@@ -1,14 +1,14 @@
+import aiohttp
 import asyncio
 import logging
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from blspy import PrivateKey, G1Element
+from blspy import AugSchemeMPL, PrivateKey, G1Element
 
-from apple.cmds.init_funcs import check_keys
 from apple.consensus.block_rewards import calculate_base_farmer_reward
+from apple.consensus.coinbase import create_puzzlehash_for_pk
 from apple.pools.pool_wallet import PoolWallet
 from apple.pools.pool_wallet_info import create_pool_state, FARMING_TO_POOL, PoolWalletInfo, PoolState
 from apple.protocols.protocol_message_types import ProtocolMessageTypes
@@ -19,7 +19,7 @@ from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.util.bech32m import decode_puzzle_hash, encode_puzzle_hash
 from apple.util.byte_types import hexstr_to_bytes
 from apple.util.ints import uint32, uint64
-from apple.util.keychain import bytes_to_mnemonic, generate_mnemonic
+from apple.util.keychain import KeyringIsLocked, bytes_to_mnemonic, generate_mnemonic
 from apple.util.path import path_from_root
 from apple.util.ws_message import WsRpcMessage, create_payload_dict
 from apple.wallet.cc_wallet.cc_wallet import CCWallet
@@ -37,6 +37,10 @@ from apple.wallet.wallet_info import WalletInfo
 from apple.wallet.wallet_node import WalletNode
 from apple.util.config import load_config
 from apple.consensus.coinbase import create_puzzlehash_for_pk
+from apple.pools.pool_puzzles import launcher_id_to_p2_puzzle_hash
+from apple.rpc.full_node_rpc_client import FullNodeRpcClient
+from apple.util.default_root import DEFAULT_ROOT_PATH
+from apple.util.ints import uint16
 
 # Timeout for response from wallet/full node for sending a transaction
 TIMEOUT = 30
@@ -65,6 +69,8 @@ class WalletRpcApi:
             "/get_sync_status": self.get_sync_status,
             "/get_height_info": self.get_height_info,
             "/farm_block": self.farm_block,  # Only when node simulator is running
+            # this function is just here for backwards-compatibility. It will probably
+            # be removed in the future
             "/get_initial_freeze_period": self.get_initial_freeze_period,
             "/get_network_info": self.get_network_info,
             # Wallet management
@@ -112,6 +118,8 @@ class WalletRpcApi:
             "/pw_self_pool": self.pw_self_pool,
             "/pw_absorb_rewards": self.pw_absorb_rewards,
             "/pw_status": self.pw_status,
+            # Pool NFT
+            "/recover_pool_nft": self.recover_pool_nft,
         }
 
     async def _state_changed(self, *args) -> List[WsRpcMessage]:
@@ -177,7 +185,7 @@ class WalletRpcApi:
             backup_info = None
             backup_path = None
             try:
-                private_key = self.service.get_key_for_fingerprint(fingerprint)
+                private_key = await self.service.get_key_for_fingerprint(fingerprint)
                 last_recovery = await download_backup(recovery_host, private_key)
                 backup_path = path_from_root(self.service.root_path, "last_recovery")
                 if backup_path.exists():
@@ -197,13 +205,27 @@ class WalletRpcApi:
         return {"success": False, "error": "Unknown Error"}
 
     async def get_public_keys(self, request: Dict):
-        fingerprints = [sk.get_g1().get_fingerprint() for (sk, seed) in self.service.keychain.get_all_private_keys()]
-        return {"public_key_fingerprints": fingerprints}
+        try:
+            assert self.service.keychain_proxy is not None  # An offering to the mypy gods
+            fingerprints = [
+                sk.get_g1().get_fingerprint() for (sk, seed) in await self.service.keychain_proxy.get_all_private_keys()
+            ]
+        except KeyringIsLocked:
+            return {"keyring_is_locked": True}
+        except Exception:
+            return {"public_key_fingerprints": []}
+        else:
+            return {"public_key_fingerprints": fingerprints}
 
     async def _get_private_key(self, fingerprint) -> Tuple[Optional[PrivateKey], Optional[bytes]]:
-        for sk, seed in self.service.keychain.get_all_private_keys():
-            if sk.get_g1().get_fingerprint() == fingerprint:
-                return sk, seed
+        try:
+            assert self.service.keychain_proxy is not None  # An offering to the mypy gods
+            all_keys = await self.service.keychain_proxy.get_all_private_keys()
+            for sk, seed in all_keys:
+                if sk.get_g1().get_fingerprint() == fingerprint:
+                    return sk, seed
+        except Exception as e:
+            log.error(f"Failed to get private key by fingerprint: {e}")
         return None, None
 
     async def get_private_key(self, request):
@@ -234,20 +256,25 @@ class WalletRpcApi:
         mnemonic = request["mnemonic"]
         passphrase = ""
         try:
-            sk = self.service.keychain.add_private_key(" ".join(mnemonic), passphrase)
+            sk = await self.service.keychain_proxy.add_private_key(" ".join(mnemonic), passphrase)
         except KeyError as e:
             return {
                 "success": False,
                 "error": f"The word '{e.args[0]}' is incorrect.'",
                 "word": e.args[0],
             }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
         fingerprint = sk.get_g1().get_fingerprint()
         await self._stop_wallet()
 
         # Makes sure the new key is added to config properly
         started = False
-        check_keys(self.service.root_path)
+        try:
+            await self.service.keychain_proxy.check_keys(self.service.root_path)
+        except Exception as e:
+            log.error(f"Failed to check_keys after adding a new key: {e}")
         request_type = request["type"]
         if request_type == "new_wallet":
             started = await self.service._start(fingerprint=fingerprint, new_wallet=True)
@@ -264,7 +291,11 @@ class WalletRpcApi:
     async def delete_key(self, request):
         await self._stop_wallet()
         fingerprint = request["fingerprint"]
-        self.service.keychain.delete_key_by_fingerprint(fingerprint)
+        try:
+            await self.service.keychain_proxy.delete_key_by_fingerprint(fingerprint)
+        except Exception as e:
+            log.error(f"Failed to delete key by fingerprint: {e}")
+            return {"success": False, "error": str(e)}
         path = path_from_root(
             self.service.root_path,
             f"{self.service.config['database_path']}-{fingerprint}",
@@ -344,7 +375,12 @@ class WalletRpcApi:
 
     async def delete_all_keys(self, request: Dict):
         await self._stop_wallet()
-        self.service.keychain.delete_all_keys()
+        try:
+            assert self.service.keychain_proxy is not None  # An offering to the mypy gods
+            await self.service.keychain_proxy.delete_all_keys()
+        except Exception as e:
+            log.error(f"Failed to delete all keys: {e}")
+            return {"success": False, "error": str(e)}
         path = path_from_root(self.service.root_path, self.service.config["database_path"])
         if path.exists():
             path.unlink()
@@ -657,9 +693,11 @@ class WalletRpcApi:
             "wallet_id": wallet_id,
         }
 
+    # this function is just here for backwards-compatibility. It will probably
+    # be removed in the future
     async def get_initial_freeze_period(self, _: Dict):
-        freeze_period = self.service.constants.INITIAL_FREEZE_END_TIMESTAMP
-        return {"INITIAL_FREEZE_END_TIMESTAMP": freeze_period}
+        # Mon May 03 2021 17:00:00 GMT+0000
+        return {"INITIAL_FREEZE_END_TIMESTAMP": 1620061200}
 
     async def get_next_address(self, request: Dict) -> Dict:
         """
@@ -695,10 +733,6 @@ class WalletRpcApi:
         if await self.service.wallet_state_manager.synced() is False:
             raise ValueError("Wallet needs to be fully synced before sending transactions")
 
-        if int(time.time()) < self.service.constants.INITIAL_FREEZE_END_TIMESTAMP:
-            end_date = datetime.fromtimestamp(float(self.service.constants.INITIAL_FREEZE_END_TIMESTAMP))
-            raise ValueError(f"No transactions before: {end_date}")
-
         wallet_id = int(request["wallet_id"])
         wallet = self.service.wallet_state_manager.wallets[wallet_id]
 
@@ -725,10 +759,6 @@ class WalletRpcApi:
 
         if await self.service.wallet_state_manager.synced() is False:
             raise ValueError("Wallet needs to be fully synced before sending transactions")
-
-        if int(time.time()) < self.service.constants.INITIAL_FREEZE_END_TIMESTAMP:
-            end_date = datetime.fromtimestamp(float(self.service.constants.INITIAL_FREEZE_END_TIMESTAMP))
-            raise ValueError(f"No transactions before: {end_date}")
 
         wallet_id = uint32(request["wallet_id"])
         wallet = self.service.wallet_state_manager.wallets[wallet_id]
@@ -908,13 +938,16 @@ class WalletRpcApi:
             mnemonic = request["words"]
             passphrase = ""
             try:
-                sk = self.service.keychain.add_private_key(" ".join(mnemonic), passphrase)
+                assert self.service.keychain_proxy is not None  # An offering to the mypy gods
+                sk = await self.service.keychain_proxy.add_private_key(" ".join(mnemonic), passphrase)
             except KeyError as e:
                 return {
                     "success": False,
                     "error": f"The word '{e.args[0]}' is incorrect.'",
                     "word": e.args[0],
                 }
+            except Exception as e:
+                return {"success": False, "error": str(e)}
         elif "fingerprint" in request:
             sk, seed = await self._get_private_key(request["fingerprint"])
 
@@ -1240,3 +1273,61 @@ class WalletRpcApi:
             "state": state.to_json_dict(),
             "unconfirmed_transactions": unconfirmed_transactions,
         }
+
+    async def recover_pool_nft(self, request):
+        launcher_id = bytes32(hexstr_to_bytes(request["launcher_id"]))
+        delay: uint64 = 604800
+        config = load_config(DEFAULT_ROOT_PATH, "config.yaml")
+        self_hostname = config["self_hostname"]
+        full_node_rpc_port = config["full_node"]["rpc_port"]
+        full_node_client = await FullNodeRpcClient.create(self_hostname, uint16(full_node_rpc_port), DEFAULT_ROOT_PATH, config)
+        try:
+            puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_all_puzzle_hashes()
+            coin_records: List[CoinRecord] = []
+            if "contract_address" in request and request["contract_address"] is not None and request["contract_address"] != "":
+                contract_address_hash = decode_puzzle_hash(request["contract_address"])
+                for puzzle_hash_b32 in puzzle_hashes:
+                    puzzle = launcher_id_to_p2_puzzle_hash(launcher_id, delay, puzzle_hash_b32)
+                    if contract_address_hash == puzzle:
+                        coin_records = await full_node_client.get_coin_records_by_puzzle_hash(puzzle, False)
+                        break
+            else:
+                for puzzle_hash_b32 in puzzle_hashes:
+                    puzzle = launcher_id_to_p2_puzzle_hash(launcher_id, delay, puzzle_hash_b32)
+                    coin_records = await full_node_client.get_coin_records_by_puzzle_hash(puzzle, False)
+                    if len(coin_records) > 0:
+                        break
+            total_amount = 0
+            record_amount = 0
+            data = {}
+            solutions = []
+            for coin_record in coin_records:
+                amount = uint64(coin_record.amount)
+                if coin_record.timestamp <= int(time.time()) - delay:
+                    solutions.append({
+                        "coin": coin_record,
+                        "puzzle_reveal": bytes(SerializedProgram.from_program(puzzle)).hex(),
+                        "solution": bytes(
+                        SerializedProgram.from_program(Program.to([amount, 0]))).hex(),
+                    })
+                    record_amount += amount
+                total_amount += amount
+            if len(solutions) > 0:
+                data = await full_node_client.push_tx({
+                    "spend_bundle": {
+                        "aggregated_signature": AugSchemeMPL.aggregate([]),
+                        "coin_solutions": solutions,
+                    }
+                })
+            data["num"] = len(coin_records)
+            data["amount"] = record_amount
+            data["total_amount"] = total_amount
+            return data
+        except Exception as e:
+            if isinstance(e, aiohttp.ClientConnectorError):
+                raise ValueError(f"Connection error. Check if full_node is running at {full_node_rpc_port}.")
+            else:
+                raise ValueError(f"Exception from 'full_node' {e}")
+        finally:
+            full_node_client.close()
+            await full_node_client.await_closed()

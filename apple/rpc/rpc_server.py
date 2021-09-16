@@ -17,6 +17,16 @@ from apple.util.ws_message import create_payload, create_payload_dict, format_re
 
 log = logging.getLogger(__name__)
 
+async def get_official_node_list(request=None):
+    async with aiohttp.request('GET', 'https://www.applecoin.in/peer_list.txt') as resp:
+        text = await resp.text()
+        data = text.split( )
+        node_list = []
+        for val in data :
+            if "." not in val:
+                continue
+            node_list.append(val)
+        return {"node_list": node_list}
 
 class RpcServer:
     """
@@ -36,7 +46,9 @@ class RpcServer:
         self.key_path = root_path / net_config["daemon_ssl"]["private_key"]
         self.ca_cert_path = root_path / net_config["private_ssl_ca"]["crt"]
         self.ca_key_path = root_path / net_config["private_ssl_ca"]["key"]
-        self.ssl_context = ssl_context_for_server(self.ca_cert_path, self.ca_key_path, self.crt_path, self.key_path)
+        self.ssl_context = ssl_context_for_server(
+            self.ca_cert_path, self.ca_key_path, self.crt_path, self.key_path, log=self.log
+        )
 
     async def stop(self):
         self.shut_down = True
@@ -96,11 +108,14 @@ class RpcServer:
         return inner
 
     async def get_connections(self, request: Dict) -> Dict:
+        request_node_type: Optional[NodeType] = None
+        if "node_type" in request:
+            request_node_type = NodeType(request["node_type"])
         if self.rpc_api.service.server is None:
             raise ValueError("Global connections is not set")
         if self.rpc_api.service.server._local_type is NodeType.FULL_NODE:
             # TODO add peaks for peers
-            connections = self.rpc_api.service.server.get_connections()
+            connections = self.rpc_api.service.server.get_connections(request_node_type)
             con_info = []
             if self.rpc_api.service.sync_store is not None:
                 peak_store = self.rpc_api.service.sync_store.peer_to_peak
@@ -130,7 +145,7 @@ class RpcServer:
                 }
                 con_info.append(con_dict)
         else:
-            connections = self.rpc_api.service.server.get_connections()
+            connections = self.rpc_api.service.server.get_connections(request_node_type)
             con_info = [
                 {
                     "type": con.connection_type,
@@ -155,10 +170,21 @@ class RpcServer:
         on_connect = None
         if hasattr(self.rpc_api.service, "on_connect"):
             on_connect = self.rpc_api.service.on_connect
-        if getattr(self.rpc_api.service, "server", None) is None or not (
-            await self.rpc_api.service.server.start_client(target_node, on_connect)
-        ):
-            raise ValueError("Start client failed, or server is not set")
+        failed = getattr(self.rpc_api.service, "server", None) is None
+        if not failed:
+            failed = await self.rpc_api.service.server.start_client(target_node, on_connect)
+        return {"failed": failed}
+
+    async def open_official_connection(self, request):
+        data = await get_official_node_list()
+        for node in data["node_list"]:
+            if ":" in node:
+                host, port = (
+                    ":".join(node.split(":")[:-1]),
+                    node.split(":")[-1],
+                )
+                self.log.info(f"open_official_connection: {node}")
+                await self.open_connection({"host": host, "port": int(port)})
         return {}
 
     async def close_connection(self, request: Dict):

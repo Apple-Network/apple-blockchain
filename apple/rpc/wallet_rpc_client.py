@@ -24,7 +24,7 @@ class WalletRpcClient(RpcClient):
         try:
             return await self.fetch(
                 "log_in",
-                {"host": "https://backup.chiaapple.com", "fingerprint": fingerprint, "type": "start"},
+                {"host": "https://backup.applecoin.in", "fingerprint": fingerprint, "type": "start"},
             )
 
         except ValueError as e:
@@ -35,7 +35,7 @@ class WalletRpcClient(RpcClient):
             return await self.fetch(
                 "log_in",
                 {
-                    "host": "https://backup.chiaapple.com",
+                    "host": "https://backup.applecoin.in",
                     "fingerprint": fingerprint,
                     "type": "restore_backup",
                     "file_path": file_path,
@@ -48,7 +48,7 @@ class WalletRpcClient(RpcClient):
         try:
             return await self.fetch(
                 "log_in",
-                {"host": "https://backup.chiaapple.com", "fingerprint": fingerprint, "type": "skip"},
+                {"host": "https://backup.applecoin.in", "fingerprint": fingerprint, "type": "skip"},
             )
         except ValueError as e:
             return e.args[0]
@@ -232,3 +232,6 @@ class WalletRpcClient(RpcClient):
             PoolWalletInfo.from_json_dict(json_dict["state"]),
             [TransactionRecord.from_json_dict(tr) for tr in json_dict["unconfirmed_transactions"]],
         )
+
+    async def recover_pool_nft(self, launcher_id: str, contract_address: str) -> Dict:
+        return await self.fetch("recover_pool_nft", {"launcher_id": launcher_id, "contract_address": contract_address})

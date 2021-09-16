@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 mkdir build_scripts\win_build
 Set-Location -Path ".\build_scripts\win_build" -PassThru
 
-git status
+#git status
 
 Write-Output "   ---"
 Write-Output "curl miniupnpc"
@@ -18,7 +18,7 @@ If ($LastExitCode -gt 0){
 }
 else
 {
-    Set-Location -Path ..\.. -PassThru
+    Set-Location -Path ../.. -PassThru
     Write-Output "miniupnpc download successful."
 }
 
@@ -30,7 +30,7 @@ python -m venv venv
 python -m pip install --upgrade pip
 pip install wheel pep517
 pip install pywin32
-pip install pyinstaller==4.2
+pip install pyinstaller==4.5
 pip install setuptools_scm
 
 Write-Output "   ---"
@@ -41,14 +41,14 @@ $env:APPLE_INSTALLER_VERSION = python .\build_scripts\installer-version.py -win
 if (-not (Test-Path env:APPLE_INSTALLER_VERSION)) {
   $env:APPLE_INSTALLER_VERSION = '0.0.0'
   Write-Output "WARNING: No environment variable APPLE_INSTALLER_VERSION set. Using 0.0.0"
-}
+  }
 Write-Output "Apple Version is: $env:APPLE_INSTALLER_VERSION"
 Write-Output "   ---"
 
 Write-Output "   ---"
 Write-Output "Build apple-blockchain wheels"
 Write-Output "   ---"
-pip wheel --use-pep517 --extra-index-url https://pypi.chia.net/simple/ -f . --wheel-dir=.\build_scripts\win_build . --use-feature=in-tree-build
+pip wheel --use-pep517 --extra-index-url https://pypi.chia.net/simple/ -f . --wheel-dir=.\build_scripts\win_build .
 
 Write-Output "   ---"
 Write-Output "Install apple-blockchain wheels into venv with pip"
@@ -75,7 +75,7 @@ Write-Output "   ---"
 Copy-Item "dist\daemon" -Destination "..\apple-blockchain-gui\" -Recurse
 Set-Location -Path "..\apple-blockchain-gui" -PassThru
 
-git status
+#git status
 
 Write-Output "   ---"
 Write-Output "Prepare Electron packager"
@@ -86,7 +86,7 @@ npm install -g electron-packager
 npm install
 npm audit fix
 
-git status
+#git status
 
 Write-Output "   ---"
 Write-Output "Electron package Windows Installer"
@@ -97,7 +97,7 @@ If ($LastExitCode -gt 0){
 }
 
 Write-Output "   ---"
-Write-Output "Increase the stack for apple command for (apple plots create) apple limitations"
+Write-Output "Increase the stack for apple command for (apple plots create) chiapos limitations"
 # editbin.exe needs to be in the path
 editbin.exe /STACK:8000000 daemon\apple.exe
 Write-Output "   ---"
@@ -117,7 +117,7 @@ Write-Output "node winstaller.js"
 node winstaller.js
 Write-Output "   ---"
 
-git status
+#git status
 
 If ($env:HAS_SECRET) {
    Write-Output "   ---"
@@ -129,7 +129,7 @@ If ($env:HAS_SECRET) {
    Write-Output "Skipping timestamp and verify signatures - no authorization to install certificates"
 }
 
-git status
+#git status
 
 Write-Output "   ---"
 Write-Output "Windows Installer complete"

@@ -44,6 +44,16 @@ class FarmerRpcApi:
                     "wallet_ui",
                 )
             ]
+        elif change == "new_plots":
+            return [
+                create_payload_dict(
+                    "get_harvesters",
+                    change_data,
+                    self.service_name,
+                    "wallet_ui",
+                )
+            ]
+
         return []
 
     async def get_signage_point(self, request: Dict) -> Dict:
@@ -60,6 +70,7 @@ class FarmerRpcApi:
                             "difficulty": sp.difficulty,
                             "sub_slot_iters": sp.sub_slot_iters,
                             "signage_point_index": sp.signage_point_index,
+                            "add_time": self.service.cache_add_time[sp.challenge_chain_sp],
                         },
                         "proofs": pospaces,
                     }
@@ -79,6 +90,7 @@ class FarmerRpcApi:
                             "difficulty": sp.difficulty,
                             "sub_slot_iters": sp.sub_slot_iters,
                             "signage_point_index": sp.signage_point_index,
+                            "add_time": self.service.cache_add_time[sp.challenge_chain_sp],
                         },
                         "proofs": pospaces,
                     }
@@ -87,7 +99,7 @@ class FarmerRpcApi:
 
     async def get_reward_targets(self, request: Dict) -> Dict:
         search_for_private_key = request["search_for_private_key"]
-        return self.service.get_reward_targets(search_for_private_key)
+        return await self.service.get_reward_targets(search_for_private_key)
 
     async def set_reward_targets(self, request: Dict) -> Dict:
         farmer_target, pool_target = None, None

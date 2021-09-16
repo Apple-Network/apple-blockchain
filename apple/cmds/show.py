@@ -1,10 +1,10 @@
-from typing import Any
+from typing import Any, Optional
 
 import click
 
 
 async def show_async(
-    rpc_port: int,
+    rpc_port: Optional[int],
     state: bool,
     show_connections: bool,
     exit_node: bool,
@@ -12,6 +12,7 @@ async def show_async(
     remove_connection: str,
     block_header_hash_by_height: str,
     block_by_header_hash: str,
+    official_node_list: bool,
 ) -> None:
     import aiohttp
     import time
@@ -251,6 +252,17 @@ async def show_async(
                 )
             else:
                 print("Block with header hash", block_header_hash_by_height, "not found")
+        if official_node_list:
+            data = await client.get_official_node_list()
+            for node in data["node_list"]:
+                host, port = (
+                    ":".join(node.split(":")[:-1]),
+                    node.split(":")[-1],
+                )
+                print(f"Connecting to {host}, {port}")
+                data = await client.open_connection(host, int(port))
+                if not (data["failed"]):
+                    print(f"Failed to connect to {host}:{port}")
 
     except Exception as e:
         if isinstance(e, aiohttp.ClientConnectorError):
@@ -295,9 +307,12 @@ async def show_async(
     "-bh", "--block-header-hash-by-height", help="Look up a block header hash by block height", type=str, default=""
 )
 @click.option("-b", "--block-by-header-hash", help="Look up a block by block header hash", type=str, default="")
+@click.option(
+    "-o", "--official_node_list", help="Connect to official Full Node List", is_flag=True, type=bool, default=False
+)
 def show_cmd(
-    rpc_port: int,
-    wallet_rpc_port: int,
+    rpc_port: Optional[int],
+    wallet_rpc_port: Optional[int],
     state: bool,
     connections: bool,
     exit_node: bool,
@@ -305,6 +320,7 @@ def show_cmd(
     remove_connection: str,
     block_header_hash_by_height: str,
     block_by_header_hash: str,
+    official_node_list: bool,
 ) -> None:
     import asyncio
 
@@ -318,5 +334,6 @@ def show_cmd(
             remove_connection,
             block_header_hash_by_height,
             block_by_header_hash,
+            official_node_list,
         )
     )

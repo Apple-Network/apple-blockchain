@@ -14,10 +14,10 @@ ROOT = pathlib.Path(importlib.import_module("apple").__file__).absolute().parent
 
 def solve_name_collision_problem(analysis):
     """
-    There is a collision between the `chia` file name (which is the executable)
-    and the `chia` directory, which contains non-code resources like `english.txt`.
+    There is a collision between the `apple` file name (which is the executable)
+    and the `apple` directory, which contains non-code resources like `english.txt`.
     We move all the resources in the zipped area so there is no
-    need to create the `chia` directory, since the names collide.
+    need to create the `apple` directory, since the names collide.
 
     Fetching data now requires going into a zip file, so it will be slower.
     It's best if files that are used frequently are cached.
