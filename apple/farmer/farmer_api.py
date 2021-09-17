@@ -29,6 +29,7 @@ from apple.util.ints import uint32, uint64
 
 class FarmerAPI:
     farmer: Farmer
+    last_challenge_time: int
 
     def __init__(self, farmer) -> None:
         self.farmer = farmer
@@ -447,6 +448,7 @@ class FarmerAPI:
             self.farmer.log.debug(f"Duplicate signage point {new_signage_point.signage_point_index}")
             return
 
+        self.last_challenge_time = int(time.time()*1000)
         self.farmer.sps[new_signage_point.challenge_chain_sp].append(new_signage_point)
         self.farmer.cache_add_time[new_signage_point.challenge_chain_sp] = uint64(int(time.time()))
         self.farmer.state_changed("new_signage_point", {"sp_hash": new_signage_point.challenge_chain_sp})
@@ -482,6 +484,7 @@ class FarmerAPI:
                     "proofs": request.proofs,
                     "total_plots": request.total_plots,
                     "timestamp": request.timestamp,
+                    "time_consuming": int(time.time()*1000)-self.last_challenge_time,
                 }
             },
         )
