@@ -17,16 +17,6 @@ from apple.util.ws_message import create_payload, create_payload_dict, format_re
 
 log = logging.getLogger(__name__)
 
-async def get_official_node_list(request=None):
-    async with aiohttp.request('GET', 'https://www.applecoin.in/peer_list.txt') as resp:
-        text = await resp.text()
-        data = text.split( )
-        node_list = []
-        for val in data :
-            if "." not in val:
-                continue
-            node_list.append(val)
-        return {"node_list": node_list}
 
 class RpcServer:
     """
@@ -170,21 +160,10 @@ class RpcServer:
         on_connect = None
         if hasattr(self.rpc_api.service, "on_connect"):
             on_connect = self.rpc_api.service.on_connect
-        failed = getattr(self.rpc_api.service, "server", None) is None
-        if not failed:
-            failed = await self.rpc_api.service.server.start_client(target_node, on_connect)
-        return {"failed": failed}
-
-    async def open_official_connection(self, request):
-        data = await get_official_node_list()
-        for node in data["node_list"]:
-            if ":" in node:
-                host, port = (
-                    ":".join(node.split(":")[:-1]),
-                    node.split(":")[-1],
-                )
-                self.log.info(f"open_official_connection: {node}")
-                await self.open_connection({"host": host, "port": int(port)})
+        if getattr(self.rpc_api.service, "server", None) is None or not (
+            await self.rpc_api.service.server.start_client(target_node, on_connect)
+        ):
+            raise ValueError("Start client failed, or server is not set")
         return {}
 
     async def close_connection(self, request: Dict):

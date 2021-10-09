@@ -164,6 +164,7 @@ def delete_unconfirmed_transactions_cmd(wallet_rpc_port: Optional[int], id, fing
 
     asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, extra_params, delete_unconfirmed_transactions))
 
+
 @wallet_cmd.command("recover_pool_nft", short_help="Recover coins in pool nft contract address")
 @click.option(
     "-wp",

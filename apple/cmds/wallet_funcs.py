@@ -27,7 +27,7 @@ def print_transaction(tx: TransactionRecord, verbose: bool, name) -> None:
         to_address = encode_puzzle_hash(tx.to_puzzle_hash, name)
         print(f"Transaction {tx.name}")
         print(f"Status: {'Confirmed' if tx.confirmed else ('In mempool' if tx.is_in_mempool() else 'Pending')}")
-        print(f"Amount: {apple_amount} {name}")
+        print(f"Amount {'sent' if tx.sent else 'received'}: {apple_amount} {name}")
         print(f"To address: {to_address}")
         print("Created at:", datetime.fromtimestamp(tx.created_at_time).strftime("%Y-%m-%d %H:%M:%S"))
         print("")
@@ -110,6 +110,7 @@ async def get_address(args: dict, wallet_client: WalletRpcClient, fingerprint: i
     wallet_id = args["id"]
     res = await wallet_client.get_next_address(wallet_id, False)
     print(res)
+
 
 async def delete_unconfirmed_transactions(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> None:
     wallet_id = args["id"]
@@ -274,4 +275,3 @@ async def recover_pool_nft(args: dict, wallet_client: WalletRpcClient, fingerpri
             f"Total Amount: {print_balance(res['total_amount'], units['apple'], address_prefix)} "
             f"Recovered Amount: {print_balance(res['amount'], units['apple'], address_prefix)} "
         )
-

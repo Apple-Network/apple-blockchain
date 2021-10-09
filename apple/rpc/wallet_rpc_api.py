@@ -1,14 +1,12 @@
-import aiohttp
 import asyncio
 import logging
 import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from blspy import AugSchemeMPL, PrivateKey, G1Element
+from blspy import PrivateKey, G1Element
 
 from apple.consensus.block_rewards import calculate_base_farmer_reward
-from apple.consensus.coinbase import create_puzzlehash_for_pk
 from apple.pools.pool_wallet import PoolWallet
 from apple.pools.pool_wallet_info import create_pool_state, FARMING_TO_POOL, PoolWalletInfo, PoolState
 from apple.protocols.protocol_message_types import ProtocolMessageTypes
@@ -37,10 +35,6 @@ from apple.wallet.wallet_info import WalletInfo
 from apple.wallet.wallet_node import WalletNode
 from apple.util.config import load_config
 from apple.consensus.coinbase import create_puzzlehash_for_pk
-from apple.pools.pool_puzzles import launcher_id_to_p2_puzzle_hash
-from apple.rpc.full_node_rpc_client import FullNodeRpcClient
-from apple.util.default_root import DEFAULT_ROOT_PATH
-from apple.util.ints import uint16
 
 # Timeout for response from wallet/full node for sending a transaction
 TIMEOUT = 30
@@ -101,7 +95,6 @@ class WalletRpcApi:
             "/cancel_trade": self.cancel_trade,
             # DID Wallet
             "/did_update_recovery_ids": self.did_update_recovery_ids,
-            "/did_spend": self.did_spend,
             "/did_get_pubkey": self.did_get_pubkey,
             "/did_get_did": self.did_get_did,
             "/did_recovery_spend": self.did_recovery_spend,
@@ -461,7 +454,7 @@ class WalletRpcApi:
             if request["mode"] == "new":
                 async with self.service.wallet_state_manager.lock:
                     cc_wallet: CCWallet = await CCWallet.create_new_cc(
-                        wallet_state_manager, main_wallet, request["amount"]
+                        wallet_state_manager, main_wallet, uint64(request["amount"])
                     )
                     colour = cc_wallet.get_colour()
                     asyncio.create_task(self._create_backup_and_upload(host))
@@ -531,7 +524,7 @@ class WalletRpcApi:
                     did_wallet: DIDWallet = await DIDWallet.create_new_did_wallet(
                         wallet_state_manager,
                         main_wallet,
-                        int(request["amount"]),
+                        uint64(request["amount"]),
                         backup_dids,
                         uint64(num_needed),
                     )
@@ -973,19 +966,9 @@ class WalletRpcApi:
         async with self.service.wallet_state_manager.lock:
             update_success = await wallet.update_recovery_list(recovery_list, new_amount_verifications_required)
             # Update coin with new ID info
-            updated_puz = await wallet.get_new_puzzle()
-            spend_bundle = await wallet.create_spend(updated_puz.get_tree_hash())
+            spend_bundle = await wallet.create_update_spend()
 
         success = spend_bundle is not None and update_success
-        return {"success": success}
-
-    async def did_spend(self, request):
-        wallet_id = int(request["wallet_id"])
-        async with self.service.wallet_state_manager.lock:
-            wallet: DIDWallet = self.service.wallet_state_manager.wallets[wallet_id]
-            spend_bundle = await wallet.create_spend(request["puzzlehash"])
-
-        success = spend_bundle is not None
         return {"success": success}
 
     async def did_get_did(self, request):

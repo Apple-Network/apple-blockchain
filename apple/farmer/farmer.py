@@ -529,12 +529,12 @@ class Farmer:
     def set_reward_targets(self, farmer_target_encoded: Optional[str], pool_target_encoded: Optional[str]):
         config = load_config(self._root_path, "config.yaml")
         if farmer_target_encoded is not None:
-            self.farmer_target = decode_puzzle_hash(farmer_target_encoded)
             self.farmer_target_encoded = farmer_target_encoded
+            self.farmer_target = decode_puzzle_hash(farmer_target_encoded)
             config["farmer"]["apple_target_address"] = farmer_target_encoded
         if pool_target_encoded is not None:
-            self.pool_target = decode_puzzle_hash(pool_target_encoded)
             self.pool_target_encoded = pool_target_encoded
+            self.pool_target = decode_puzzle_hash(pool_target_encoded)
             config["pool"]["apple_target_address"] = pool_target_encoded
         save_config(self._root_path, "config.yaml", config)
 

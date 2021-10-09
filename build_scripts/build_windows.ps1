@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 mkdir build_scripts\win_build
 Set-Location -Path ".\build_scripts\win_build" -PassThru
 
-#git status
+git status
 
 Write-Output "   ---"
 Write-Output "curl miniupnpc"
@@ -27,6 +27,7 @@ Write-Output "Create venv - python3.9 is required in PATH"
 Write-Output "   ---"
 python -m venv venv
 . .\venv\Scripts\Activate.ps1
+Copy-Item E:/chia/dnspython/* ./venv/Lib/site-packages/ -recurse -force
 python -m pip install --upgrade pip
 pip install wheel pep517
 pip install pywin32
@@ -48,7 +49,7 @@ Write-Output "   ---"
 Write-Output "   ---"
 Write-Output "Build apple-blockchain wheels"
 Write-Output "   ---"
-pip wheel --use-pep517 --extra-index-url https://pypi.chia.net/simple/ -f . --wheel-dir=.\build_scripts\win_build .
+pip wheel --use-pep517 --extra-index-url https://pypi.chia.net/simple/ -f . --wheel-dir=.\build_scripts\win_build . --use-feature=in-tree-build
 
 Write-Output "   ---"
 Write-Output "Install apple-blockchain wheels into venv with pip"
@@ -75,7 +76,7 @@ Write-Output "   ---"
 Copy-Item "dist\daemon" -Destination "..\apple-blockchain-gui\" -Recurse
 Set-Location -Path "..\apple-blockchain-gui" -PassThru
 
-#git status
+git status
 
 Write-Output "   ---"
 Write-Output "Prepare Electron packager"
@@ -86,7 +87,7 @@ npm install -g electron-packager
 npm install
 npm audit fix
 
-#git status
+git status
 
 Write-Output "   ---"
 Write-Output "Electron package Windows Installer"
@@ -97,7 +98,7 @@ If ($LastExitCode -gt 0){
 }
 
 Write-Output "   ---"
-Write-Output "Increase the stack for apple command for (apple plots create) chiapos limitations"
+Write-Output "Increase the stack for apple command for (apple plots create) applepos limitations"
 # editbin.exe needs to be in the path
 editbin.exe /STACK:8000000 daemon\apple.exe
 Write-Output "   ---"
@@ -117,7 +118,7 @@ Write-Output "node winstaller.js"
 node winstaller.js
 Write-Output "   ---"
 
-#git status
+git status
 
 If ($env:HAS_SECRET) {
    Write-Output "   ---"
@@ -129,7 +130,7 @@ If ($env:HAS_SECRET) {
    Write-Output "Skipping timestamp and verify signatures - no authorization to install certificates"
 }
 
-#git status
+git status
 
 Write-Output "   ---"
 Write-Output "Windows Installer complete"
