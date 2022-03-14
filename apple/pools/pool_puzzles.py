@@ -169,20 +169,20 @@ def create_travel_spend(
     if is_pool_member_inner_puzzle(inner_puzzle):
         # inner sol is key_value_list ()
         # key_value_list is:
-        # "ps" -> poolstate as bytes
+        # "p" -> poolstate as bytes
         inner_sol: Program = Program.to([[("p", bytes(target))], 0])
     elif is_pool_waitingroom_inner_puzzle(inner_puzzle):
         # inner sol is (spend_type, key_value_list, pool_reward_height)
         destination_inner: Program = pool_state_to_inner_puzzle(
             target, launcher_coin.name(), genesis_challenge, delay_time, delay_ph
         )
-        log.warning(
+        log.debug(
             f"create_travel_spend: waitingroom: target PoolState bytes:\n{bytes(target).hex()}\n"
             f"{target}"
             f"hash:{Program.to(bytes(target)).get_tree_hash()}"
         )
         # key_value_list is:
-        # "ps" -> poolstate as bytes
+        # "p" -> poolstate as bytes
         inner_sol = Program.to([1, [("p", bytes(target))], destination_inner.get_tree_hash()])  # current or target
     else:
         raise ValueError
@@ -388,7 +388,7 @@ def solution_to_pool_state(full_spend: CoinSpend) -> Optional[PoolState]:
         if inner_solution.rest().first().as_int() != 0:
             return None
 
-        # This is referred to as p1 in the applelisp code
+        # This is referred to as p1 in the chialisp code
         # spend_type is absorbing money if p1 is a cons box, spend_type is escape if p1 is an atom
         # TODO: The comment above, and in the CLVM, seems wrong
         extra_data = inner_solution.first()

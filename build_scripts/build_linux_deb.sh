@@ -24,15 +24,17 @@ fi
 echo "Apple Installer Version is: $APPLE_INSTALLER_VERSION"
 
 echo "Installing npm and electron packagers"
-npm install electron-packager -g
-npm install electron-installer-debian -g
+cd npm_linux_deb || exit
+npm ci
+PATH=$(npm bin):$PATH
+cd .. || exit
 
 echo "Create dist/"
 rm -rf dist
 mkdir dist
 
 echo "Create executables with pyinstaller"
-pip install pyinstaller==4.5
+pip install pyinstaller==4.9
 SPEC_FILE=$(python -c 'import apple; print(apple.PYINSTALLER_SPEC_PATH)')
 pyinstaller --log-level=INFO "$SPEC_FILE"
 LAST_EXIT_CODE=$?
@@ -41,13 +43,15 @@ if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	exit $LAST_EXIT_CODE
 fi
 
-cp -r dist/daemon ../apple-blockchain-gui
+cp -r dist/daemon ../apple-blockchain-gui/packages/gui
 cd .. || exit
 cd apple-blockchain-gui || exit
 
 echo "npm build"
-npm install
-npm audit fix
+lerna clean -y
+npm ci
+# Audit fix does not currently work with Lerna. See https://github.com/lerna/lerna/issues/1663
+# npm audit fix
 npm run build
 LAST_EXIT_CODE=$?
 if [ "$LAST_EXIT_CODE" -ne 0 ]; then
@@ -55,13 +59,16 @@ if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	exit $LAST_EXIT_CODE
 fi
 
+# Change to the gui package
+cd packages/gui || exit
+
 # sets the version for apple-blockchain in package.json
 cp package.json package.json.orig
 jq --arg VER "$APPLE_INSTALLER_VERSION" '.version=$VER' package.json > temp.json && mv temp.json package.json
 
 electron-packager . apple-blockchain --asar.unpack="**/daemon/**" --platform=linux \
---icon=src/assets/img/Apple.icns --overwrite --app-bundle-id=net.apple.blockchain \
---appVersion=$APPLE_INSTALLER_VERSION
+--icon=src/assets/img/Apple.icns --overwrite --app-bundle-id=in.applecoin.blockchain \
+--appVersion=$APPLE_INSTALLER_VERSION --executable-name=apple-blockchain
 LAST_EXIT_CODE=$?
 
 # reset the package.json to the original
@@ -72,14 +79,14 @@ if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	exit $LAST_EXIT_CODE
 fi
 
-mv $DIR_NAME ../build_scripts/dist/
-cd ../build_scripts || exit
+mv $DIR_NAME ../../../build_scripts/dist/
+cd ../../../build_scripts || exit
 
 echo "Create apple-$APPLE_INSTALLER_VERSION.deb"
 rm -rf final_installer
 mkdir final_installer
 electron-installer-debian --src dist/$DIR_NAME/ --dest final_installer/ \
---arch "$PLATFORM" --options.version $APPLE_INSTALLER_VERSION
+--arch "$PLATFORM" --options.version $APPLE_INSTALLER_VERSION --options.bin apple-blockchain --options.name apple-blockchain
 LAST_EXIT_CODE=$?
 if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	echo >&2 "electron-installer-debian failed!"

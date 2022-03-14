@@ -10,10 +10,12 @@ SERVICES_FOR_GROUP = {
     "timelord": "apple_timelord_launcher apple_timelord apple_full_node".split(),
     "timelord-only": "apple_timelord".split(),
     "timelord-launcher-only": "apple_timelord_launcher".split(),
-    "wallet": "apple_wallet apple_full_node".split(),
-    "wallet-only": "apple_wallet".split(),
+    "wallet": "apple_wallet".split(),
     "introducer": "apple_introducer".split(),
     "simulator": "apple_full_node_simulator".split(),
+    "crawler": "apple_crawler".split(),
+    "seeder": "apple_crawler apple_seeder".split(),
+    "seeder-only": "apple_seeder".split(),
 }
 
 

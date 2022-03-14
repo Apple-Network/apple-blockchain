@@ -1,4 +1,5 @@
 import colorama
+import os
 import pkg_resources
 import sys
 import unicodedata
@@ -7,7 +8,6 @@ from bitstring import BitArray  # pyright: reportMissingImports=false
 from blspy import AugSchemeMPL, G1Element, PrivateKey  # pyright: reportMissingImports=false
 from apple.util.hash import std_hash
 from apple.util.keyring_wrapper import KeyringWrapper
-from getpass import getpass
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import token_bytes
@@ -43,16 +43,17 @@ class KeyringMaxUnlockAttempts(Exception):
     pass
 
 
-def supports_keyring_passphrase() -> bool:
-    # TODO: Enable for Linux once GUI work is finalized (including migration)
-    return False
-    # from sys import platform
+class KeyringNotSet(Exception):
+    pass
 
-    # return platform == "linux"
+
+def supports_keyring_passphrase() -> bool:
+    # Support can be disabled by setting APPLE_PASSPHRASE_SUPPORT to 0/false
+    return os.environ.get("APPLE_PASSPHRASE_SUPPORT", "true").lower() in ["1", "true"]
 
 
 def supports_os_passphrase_storage() -> bool:
-    return sys.platform in ["darwin"]
+    return sys.platform in ["darwin", "win32", "cygwin"]
 
 
 def passphrase_requirements() -> Dict[str, Any]:
@@ -79,6 +80,8 @@ def obtain_current_passphrase(prompt: str = DEFAULT_PASSPHRASE_PROMPT, use_passp
     prompted interactively to enter their passphrase a max of MAX_RETRIES times
     before failing.
     """
+    from apple.cmds.passphrase_funcs import prompt_for_passphrase
+
     if use_passphrase_cache:
         passphrase, validated = KeyringWrapper.get_shared_instance().get_cached_master_passphrase()
         if passphrase:
@@ -98,7 +101,7 @@ def obtain_current_passphrase(prompt: str = DEFAULT_PASSPHRASE_PROMPT, use_passp
     for i in range(MAX_RETRIES):
         colorama.init()
 
-        passphrase = getpass(prompt)
+        passphrase = prompt_for_passphrase(prompt)
 
         if KeyringWrapper.get_shared_instance().master_passphrase_is_valid(passphrase):
             # If using the passphrase cache, and the user inputted a passphrase, update the cache
@@ -236,10 +239,18 @@ class Keychain:
     list of all keys.
     """
 
-    def __init__(self, user: Optional[str] = None, service: Optional[str] = None):
+    def __init__(self, user: Optional[str] = None, service: Optional[str] = None, force_legacy: bool = False):
         self.user = user if user is not None else default_keychain_user()
         self.service = service if service is not None else default_keychain_service()
-        self.keyring_wrapper = KeyringWrapper.get_shared_instance()
+
+        keyring_wrapper: Optional[KeyringWrapper] = (
+            KeyringWrapper.get_legacy_instance() if force_legacy else KeyringWrapper.get_shared_instance()
+        )
+
+        if keyring_wrapper is None:
+            raise KeyringNotSet(f"KeyringWrapper not set: force_legacy={force_legacy}")
+
+        self.keyring_wrapper = keyring_wrapper
 
     @unlocks_keyring(use_passphrase_cache=True)
     def _get_pk_and_entropy(self, user: str) -> Optional[Tuple[G1Element, bytes]]:
@@ -400,6 +411,27 @@ class Keychain:
             index += 1
             pkent = self._get_pk_and_entropy(get_private_key_user(self.user, index))
 
+    def delete_keys(self, keys_to_delete: List[Tuple[PrivateKey, bytes]]):
+        """
+        Deletes all keys in the list.
+        """
+        remaining_keys = {str(x[0]) for x in keys_to_delete}
+        index = 0
+        pkent = self._get_pk_and_entropy(get_private_key_user(self.user, index))
+        while index <= MAX_KEYS and len(remaining_keys) > 0:
+            if pkent is not None:
+                mnemonic = bytes_to_mnemonic(pkent[1])
+                seed = mnemonic_to_seed(mnemonic, "")
+                sk = AugSchemeMPL.key_gen(seed)
+                sk_str = str(sk)
+                if sk_str in remaining_keys:
+                    self.keyring_wrapper.delete_passphrase(self.service, get_private_key_user(self.user, index))
+                    remaining_keys.remove(sk_str)
+            index += 1
+            pkent = self._get_pk_and_entropy(get_private_key_user(self.user, index))
+        if len(remaining_keys) > 0:
+            raise ValueError(f"{len(remaining_keys)} keys could not be found for deletion")
+
     def delete_all_keys(self):
         """
         Deletes all keys from the keychain.
@@ -464,6 +496,44 @@ class Keychain:
         return KeyringWrapper.get_shared_instance().using_legacy_keyring()
 
     @staticmethod
+    def migration_checked_for_current_version() -> bool:
+        """
+        Returns a bool indicating whether the current client version has checked the legacy keyring
+        for keys needing migration.
+        """
+
+        def compare_versions(version1: str, version2: str) -> int:
+            # Making the assumption that versions will be of the form: x[x].y[y].z[z]
+            # We limit the number of components to 3, with each component being up to 2 digits long
+            ver1: List[int] = [int(n[:2]) for n in version1.split(".")[:3]]
+            ver2: List[int] = [int(n[:2]) for n in version2.split(".")[:3]]
+            if ver1 > ver2:
+                return 1
+            elif ver1 < ver2:
+                return -1
+            else:
+                return 0
+
+        migration_version_file: Path = KeyringWrapper.get_shared_instance().keys_root_path / ".last_legacy_migration"
+        if migration_version_file.exists():
+            current_version_str = pkg_resources.get_distribution("apple-blockchain").version
+            with migration_version_file.open("r") as f:
+                last_migration_version_str = f.read().strip()
+            return compare_versions(current_version_str, last_migration_version_str) <= 0
+
+        return False
+
+    @staticmethod
+    def mark_migration_checked_for_current_version():
+        """
+        Marks the current client version as having checked the legacy keyring for keys needing migration.
+        """
+        migration_version_file: Path = KeyringWrapper.get_shared_instance().keys_root_path / ".last_legacy_migration"
+        current_version_str = pkg_resources.get_distribution("apple-blockchain").version
+        with migration_version_file.open("w") as f:
+            f.write(current_version_str)
+
+    @staticmethod
     def handle_migration_completed():
         """
         When migration completes outside of the current process, we rely on a notification to inform
@@ -473,16 +543,75 @@ class Keychain:
         KeyringWrapper.get_shared_instance().refresh_keyrings()
 
     @staticmethod
-    def migrate_legacy_keyring(passphrase: Optional[str] = None, cleanup_legacy_keyring: bool = False) -> None:
+    def migrate_legacy_keyring(
+        passphrase: Optional[str] = None,
+        passphrase_hint: Optional[str] = None,
+        save_passphrase: bool = False,
+        cleanup_legacy_keyring: bool = False,
+    ) -> None:
         """
         Begins legacy keyring migration in a non-interactive manner
         """
         if passphrase is not None and passphrase != "":
             KeyringWrapper.get_shared_instance().set_master_passphrase(
-                current_passphrase=None, new_passphrase=passphrase, write_to_keyring=False, allow_migration=False
+                current_passphrase=None,
+                new_passphrase=passphrase,
+                write_to_keyring=False,
+                allow_migration=False,
+                passphrase_hint=passphrase_hint,
+                save_passphrase=save_passphrase,
             )
 
         KeyringWrapper.get_shared_instance().migrate_legacy_keyring(cleanup_legacy_keyring=cleanup_legacy_keyring)
+
+    @staticmethod
+    def get_keys_needing_migration() -> Tuple[List[Tuple[PrivateKey, bytes]], Optional["Keychain"]]:
+        try:
+            legacy_keyring: Keychain = Keychain(force_legacy=True)
+        except KeyringNotSet:
+            # No legacy keyring available, so no keys need to be migrated
+            return [], None
+        keychain = Keychain()
+        all_legacy_sks = legacy_keyring.get_all_private_keys()
+        all_sks = keychain.get_all_private_keys()
+        set_legacy_sks = {str(x[0]) for x in all_legacy_sks}
+        set_sks = {str(x[0]) for x in all_sks}
+        missing_legacy_keys = set_legacy_sks - set_sks
+        keys_needing_migration = [x for x in all_legacy_sks if str(x[0]) in missing_legacy_keys]
+
+        return keys_needing_migration, legacy_keyring
+
+    @staticmethod
+    def verify_keys_present(keys_to_verify: List[Tuple[PrivateKey, bytes]]) -> bool:
+        """
+        Verifies that the given keys are present in the keychain.
+        """
+        keychain = Keychain()
+        all_sks = keychain.get_all_private_keys()
+        set_sks = {str(x[0]) for x in all_sks}
+        keys_present = set_sks.issuperset(set(map(lambda x: str(x[0]), keys_to_verify)))
+        return keys_present
+
+    @staticmethod
+    def migrate_legacy_keys_silently():
+        """
+        Migrates keys silently, without prompting the user. Requires that keyring.yaml already exists.
+        Does not attempt to delete migrated keys from their old location.
+        """
+        if Keychain.needs_migration():
+            raise RuntimeError("Full keyring migration is required. Cannot run silently.")
+
+        keys_to_migrate, _ = Keychain.get_keys_needing_migration()
+        if len(keys_to_migrate) > 0:
+            keychain = Keychain()
+            for _, seed_bytes in keys_to_migrate:
+                mnemonic = bytes_to_mnemonic(seed_bytes)
+                keychain.add_private_key(mnemonic, "")
+
+            if not Keychain.verify_keys_present(keys_to_migrate):
+                raise RuntimeError("Failed to migrate keys. Legacy keyring left intact.")
+
+        Keychain.mark_migration_checked_for_current_version()
 
     @staticmethod
     def passphrase_is_optional() -> bool:
@@ -558,6 +687,7 @@ class Keychain:
         new_passphrase: str,
         *,
         allow_migration: bool = True,
+        passphrase_hint: Optional[str] = None,
         save_passphrase: bool = False,
     ) -> None:
         """
@@ -565,7 +695,11 @@ class Keychain:
         passphrase can decrypt the contents
         """
         KeyringWrapper.get_shared_instance().set_master_passphrase(
-            current_passphrase, new_passphrase, allow_migration=allow_migration, save_passphrase=save_passphrase
+            current_passphrase,
+            new_passphrase,
+            allow_migration=allow_migration,
+            passphrase_hint=passphrase_hint,
+            save_passphrase=save_passphrase,
         )
 
     @staticmethod
@@ -576,3 +710,18 @@ class Keychain:
         default passphrase.
         """
         KeyringWrapper.get_shared_instance().remove_master_passphrase(current_passphrase)
+
+    @staticmethod
+    def get_master_passphrase_hint() -> Optional[str]:
+        """
+        Returns the passphrase hint from the keyring
+        """
+        return KeyringWrapper.get_shared_instance().get_master_passphrase_hint()
+
+    @staticmethod
+    def set_master_passphrase_hint(current_passphrase: str, passphrase_hint: Optional[str]) -> None:
+        """
+        Convenience method for setting/removing the passphrase hint. Requires the current
+        passphrase, as the passphrase hint is written as part of a passphrase update.
+        """
+        Keychain.set_master_passphrase(current_passphrase, current_passphrase, passphrase_hint=passphrase_hint)

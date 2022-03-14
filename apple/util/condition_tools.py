@@ -1,14 +1,14 @@
 from typing import Dict, List, Optional, Tuple, Set
 
-from blspy import G1Element
+from clvm.casts import int_from_bytes
 
 from apple.types.announcement import Announcement
+from apple.types.name_puzzle_condition import NPC
 from apple.types.blockchain_format.coin import Coin
 from apple.types.blockchain_format.program import Program, SerializedProgram
-from apple.types.blockchain_format.sized_bytes import bytes32
+from apple.types.blockchain_format.sized_bytes import bytes32, bytes48
 from apple.types.condition_opcodes import ConditionOpcode
 from apple.types.condition_with_args import ConditionWithArgs
-from apple.util.clvm import int_from_bytes
 from apple.util.errors import ConsensusError, Err
 from apple.util.ints import uint64
 
@@ -65,23 +65,45 @@ def conditions_by_opcode(
     return d
 
 
+def pkm_pairs(npc_list: List[NPC], additional_data: bytes) -> Tuple[List[bytes48], List[bytes]]:
+    ret: Tuple[List[bytes48], List[bytes]] = ([], [])
+
+    for npc in npc_list:
+        for opcode, l in npc.conditions:
+            if opcode == ConditionOpcode.AGG_SIG_UNSAFE:
+                for cwa in l:
+                    assert len(cwa.vars) == 2
+                    assert len(cwa.vars[0]) == 48 and len(cwa.vars[1]) <= 1024
+                    assert cwa.vars[0] is not None and cwa.vars[1] is not None
+                    ret[0].append(bytes48(cwa.vars[0]))
+                    ret[1].append(cwa.vars[1])
+            elif opcode == ConditionOpcode.AGG_SIG_ME:
+                for cwa in l:
+                    assert len(cwa.vars) == 2
+                    assert len(cwa.vars[0]) == 48 and len(cwa.vars[1]) <= 1024
+                    assert cwa.vars[0] is not None and cwa.vars[1] is not None
+                    ret[0].append(bytes48(cwa.vars[0]))
+                    ret[1].append(cwa.vars[1] + npc.coin_name + additional_data)
+    return ret
+
+
 def pkm_pairs_for_conditions_dict(
     conditions_dict: Dict[ConditionOpcode, List[ConditionWithArgs]], coin_name: bytes32, additional_data: bytes
-) -> List[Tuple[G1Element, bytes]]:
+) -> List[Tuple[bytes48, bytes]]:
     assert coin_name is not None
-    ret: List[Tuple[G1Element, bytes]] = []
+    ret: List[Tuple[bytes48, bytes]] = []
 
     for cwa in conditions_dict.get(ConditionOpcode.AGG_SIG_UNSAFE, []):
         assert len(cwa.vars) == 2
         assert len(cwa.vars[0]) == 48 and len(cwa.vars[1]) <= 1024
         assert cwa.vars[0] is not None and cwa.vars[1] is not None
-        ret.append((G1Element.from_bytes(cwa.vars[0]), cwa.vars[1]))
+        ret.append((bytes48(cwa.vars[0]), cwa.vars[1]))
 
     for cwa in conditions_dict.get(ConditionOpcode.AGG_SIG_ME, []):
         assert len(cwa.vars) == 2
         assert len(cwa.vars[0]) == 48 and len(cwa.vars[1]) <= 1024
         assert cwa.vars[0] is not None and cwa.vars[1] is not None
-        ret.append((G1Element.from_bytes(cwa.vars[0]), cwa.vars[1] + coin_name + additional_data))
+        ret.append((bytes48(cwa.vars[0]), cwa.vars[1] + coin_name + additional_data))
     return ret
 
 
@@ -93,7 +115,7 @@ def created_outputs_for_conditions_dict(
     for cvp in conditions_dict.get(ConditionOpcode.CREATE_COIN, []):
         puzzle_hash, amount_bin = cvp.vars[0], cvp.vars[1]
         amount = int_from_bytes(amount_bin)
-        coin = Coin(input_coin_name, puzzle_hash, uint64(amount))
+        coin = Coin(input_coin_name, bytes32(puzzle_hash), uint64(amount))
         output_coins.append(coin)
     return output_coins
 

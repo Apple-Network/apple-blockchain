@@ -7,6 +7,7 @@ from apple.types.condition_opcodes import ConditionOpcode
 from apple.util.bech32m import decode_puzzle_hash, encode_puzzle_hash
 from apple.util.condition_tools import parse_sexp_to_conditions
 from apple.util.ints import uint32
+from apple.types.blockchain_format.sized_bytes import bytes32
 
 address1 = "tapple15gx26ndmacfaqlq8m0yajeggzceu7cvmaz4df0hahkukes695rss6lej7h"  # Gene wallet (m/12381/8444/2/42):
 address2 = "tapple1c2cguswhvmdyz9hr3q6hak2h6p9dw4rz82g4707k2xy2sarv705qcce4pn"  # Mariano address (m/12381/8444/2/0)
@@ -46,7 +47,7 @@ def make_puzzle(amount: int) -> int:
             assert len(cvp.vars) == 2
             total_apple += int_from_bytes(cvp.vars[1])
             print(
-                f"{ConditionOpcode(cvp.opcode).name}: {encode_puzzle_hash(cvp.vars[0], prefix)},"
+                f"{ConditionOpcode(cvp.opcode).name}: {encode_puzzle_hash(bytes32(cvp.vars[0]), prefix)},"
                 f" amount: {int_from_bytes(cvp.vars[1])}"
             )
     return total_apple

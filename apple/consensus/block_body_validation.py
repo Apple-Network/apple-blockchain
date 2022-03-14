@@ -1,23 +1,21 @@
 import collections
 import logging
-from typing import Dict, List, Optional, Set, Tuple, Union, Callable
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
-from blspy import G1Element
 from chiabip158 import PyBIP158
 from clvm.casts import int_from_bytes
 
 from apple.consensus.block_record import BlockRecord
 from apple.consensus.block_rewards import calculate_base_farmer_reward, calculate_pool_reward
 from apple.consensus.block_root_validation import validate_block_merkle_roots
-from apple.full_node.mempool_check_conditions import mempool_check_conditions_dict
 from apple.consensus.blockchain_interface import BlockchainInterface
 from apple.consensus.coinbase import create_farmer_coin, create_pool_coin
 from apple.consensus.constants import ConsensusConstants
-from apple.consensus.cost_calculator import NPCResult, calculate_cost_of_program
+from apple.consensus.cost_calculator import NPCResult
 from apple.consensus.find_fork_point import find_fork_point_in_chain
 from apple.full_node.block_store import BlockStore
 from apple.full_node.coin_store import CoinStore
-from apple.full_node.mempool_check_conditions import get_name_puzzle_conditions
+from apple.full_node.mempool_check_conditions import get_name_puzzle_conditions, mempool_check_conditions_dict
 from apple.types.blockchain_format.coin import Coin
 from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.types.coin_record import CoinRecord
@@ -28,14 +26,9 @@ from apple.types.generator_types import BlockGenerator
 from apple.types.name_puzzle_condition import NPC
 from apple.types.unfinished_block import UnfinishedBlock
 from apple.util import cached_bls
-from apple.util.condition_tools import (
-    pkm_pairs_for_conditions_dict,
-)
+from apple.util.condition_tools import pkm_pairs
 from apple.util.errors import Err
-from apple.util.generator_tools import (
-    additions_for_npc,
-    tx_removals_and_additions,
-)
+from apple.util.generator_tools import additions_for_npc, tx_removals_and_additions
 from apple.util.hash import std_hash
 from apple.util.ints import uint32, uint64, uint128
 
@@ -53,6 +46,8 @@ async def validate_block_body(
     npc_result: Optional[NPCResult],
     fork_point_with_peak: Optional[uint32],
     get_block_generator: Callable,
+    *,
+    validate_signature=True,
 ) -> Tuple[Optional[Err], Optional[NPCResult]]:
     """
     This assumes the header block has been completely validated.
@@ -161,7 +156,7 @@ async def validate_block_body(
     removals_puzzle_dic: Dict[bytes32, bytes32] = {}
     cost: uint64 = uint64(0)
 
-    # In header validation we check that timestamp is not more that 10 minutes into the future
+    # In header validation we check that timestamp is not more that 5 minutes into the future
     # 6. No transactions before INITIAL_TRANSACTION_FREEZE timestamp
     # (this test has been removed)
 
@@ -199,7 +194,7 @@ async def validate_block_body(
         # Get List of names removed, puzzles hashes for removed coins and conditions created
 
         assert npc_result is not None
-        cost = calculate_cost_of_program(block.transactions_generator, npc_result, constants.COST_PER_BYTE)
+        cost = npc_result.cost
         npc_list = npc_result.npc_list
 
         # 7. Check that cost <= MAX_BLOCK_COST_CLVM
@@ -252,9 +247,15 @@ async def validate_block_body(
     byte_array_tx: List[bytes32] = []
 
     for coin in additions + coinbase_additions:
-        byte_array_tx.append(bytearray(coin.puzzle_hash))
+        # TODO: address hint error and remove ignore
+        #       error: Argument 1 to "append" of "list" has incompatible type "bytearray"; expected "bytes32"
+        #       [arg-type]
+        byte_array_tx.append(bytearray(coin.puzzle_hash))  # type: ignore[arg-type]
     for coin_name in removals:
-        byte_array_tx.append(bytearray(coin_name))
+        # TODO: address hint error and remove ignore
+        #       error: Argument 1 to "append" of "list" has incompatible type "bytearray"; expected "bytes32"
+        #       [arg-type]
+        byte_array_tx.append(bytearray(coin_name))  # type: ignore[arg-type]
 
     bip158: PyBIP158 = PyBIP158(byte_array_tx)
     encoded_filter = bytes(bip158.GetEncoded())
@@ -318,7 +319,8 @@ async def validate_block_body(
                     curr_block_generator,
                     min(constants.MAX_BLOCK_COST_CLVM, curr.transactions_info.cost),
                     cost_per_byte=constants.COST_PER_BYTE,
-                    safe_mode=False,
+                    mempool_mode=False,
+                    height=curr.height,
                 )
                 removals_in_curr, additions_in_curr = tx_removals_and_additions(curr_npc_result.npc_list)
             else:
@@ -355,7 +357,6 @@ async def validate_block_body(
                 rem_coin,
                 height,
                 height,
-                True,
                 False,
                 block.foliage_transaction_block.timestamp,
             )
@@ -380,7 +381,6 @@ async def validate_block_body(
                     new_coin,
                     confirmed_height,
                     uint32(0),
-                    False,
                     False,
                     confirmed_timestamp,
                 )
@@ -435,9 +435,6 @@ async def validate_block_body(
             return Err.WRONG_PUZZLE_HASH, None
 
     # 21. Verify conditions
-    # create hash_key list for aggsig check
-    pairs_pks: List[G1Element] = []
-    pairs_msgs: List[bytes] = []
     for npc in npc_list:
         assert height is not None
         unspent = removal_coin_records[npc.coin_name]
@@ -449,11 +446,9 @@ async def validate_block_body(
         )
         if error:
             return error, None
-        for pk, m in pkm_pairs_for_conditions_dict(
-            npc.condition_dict, npc.coin_name, constants.AGG_SIG_ME_ADDITIONAL_DATA
-        ):
-            pairs_pks.append(pk)
-            pairs_msgs.append(m)
+
+    # create hash_key list for aggsig check
+    pairs_pks, pairs_msgs = pkm_pairs(npc_list, constants.AGG_SIG_ME_ADDITIONAL_DATA)
 
     # 22. Verify aggregated signature
     # TODO: move this to pre_validate_blocks_multiprocessing so we can sync faster
@@ -465,10 +460,11 @@ async def validate_block_body(
     # However, we force caching of pairings just for unfinished blocks
     # as the cache is likely to be useful when validating the corresponding
     # finished blocks later.
-    force_cache: bool = isinstance(block, UnfinishedBlock)
-    if not cached_bls.aggregate_verify(
-        pairs_pks, pairs_msgs, block.transactions_info.aggregated_signature, force_cache
-    ):
-        return Err.BAD_AGGREGATE_SIGNATURE, None
+    if validate_signature:
+        force_cache: bool = isinstance(block, UnfinishedBlock)
+        if not cached_bls.aggregate_verify(
+            pairs_pks, pairs_msgs, block.transactions_info.aggregated_signature, force_cache
+        ):
+            return Err.BAD_AGGREGATE_SIGNATURE, None
 
     return None, npc_result

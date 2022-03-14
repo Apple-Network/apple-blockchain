@@ -7,7 +7,7 @@ from apple.types.blockchain_format.program import Program
 from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.types.condition_opcodes import ConditionOpcode
 from apple.util.ints import uint64
-from apple.wallet.applelisp import sexp
+from apple.wallet.chialisp import sexp
 from apple.wallet.puzzles.load_clvm import load_clvm
 
 RATE_LIMITED_MODE = 1

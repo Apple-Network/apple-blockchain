@@ -1,11 +1,12 @@
 import json
 import time
-from typing import Callable, Optional, List, Any, Dict
+from typing import Callable, Optional, List, Any, Dict, Tuple
 
 import aiohttp
 from blspy import AugSchemeMPL, G2Element, PrivateKey
 
 import apple.server.ws_connection as ws
+from apple import __version__
 from apple.consensus.network_type import NetworkType
 from apple.consensus.pot_iterations import calculate_iterations_quality, calculate_sp_interval_iters
 from apple.farmer.farmer import Farmer
@@ -27,9 +28,18 @@ from apple.util.api_decorators import api_request, peer_required
 from apple.util.ints import uint32, uint64
 
 
+def strip_old_entries(pairs: List[Tuple[float, Any]], before: float) -> List[Tuple[float, Any]]:
+    for index, [timestamp, points] in enumerate(pairs):
+        if timestamp >= before:
+            if index == 0:
+                return pairs
+            if index > 0:
+                return pairs[index:]
+    return []
+
+
 class FarmerAPI:
     farmer: Farmer
-    last_challenge_time: int
 
     def __init__(self, farmer) -> None:
         self.farmer = farmer
@@ -200,11 +210,14 @@ class FarmerAPI:
                             [sig_farmer, response.message_signatures[0][1], taproot_sig]
                         )
                         assert AugSchemeMPL.verify(agg_pk, m_to_sign, plot_signature)
-                authentication_pk = pool_state_dict["pool_config"].authentication_public_key
-                if bytes(authentication_pk) is None:
-                    self.farmer.log.error(f"No authentication sk for {authentication_pk}")
+
+                authentication_sk: Optional[PrivateKey] = self.farmer.get_authentication_sk(
+                    pool_state_dict["pool_config"]
+                )
+                if authentication_sk is None:
+                    self.farmer.log.error(f"No authentication sk for {p2_singleton_puzzle_hash}")
                     return
-                authentication_sk: PrivateKey = self.farmer.authentication_keys[bytes(authentication_pk)]
+
                 authentication_signature = AugSchemeMPL.sign(authentication_sk, m_to_sign)
 
                 assert plot_signature is not None
@@ -217,13 +230,14 @@ class FarmerAPI:
                 )
                 pool_state_dict["points_found_since_start"] += pool_state_dict["current_difficulty"]
                 pool_state_dict["points_found_24h"].append((time.time(), pool_state_dict["current_difficulty"]))
-
+                self.farmer.log.debug(f"POST /partial request {post_partial_request}")
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
                             f"{pool_url}/partial",
                             json=post_partial_request.to_json_dict(),
                             ssl=ssl_context_for_root(get_mozilla_ca_crt(), log=self.farmer.log),
+                            headers={"User-Agent": f"Apple Blockchain v.{__version__}"},
                         ) as resp:
                             if resp.ok:
                                 pool_response: Dict = json.loads(await resp.text())
@@ -411,44 +425,56 @@ class FarmerAPI:
 
     @api_request
     async def new_signage_point(self, new_signage_point: farmer_protocol.NewSignagePoint):
-        pool_difficulties: List[PoolDifficulty] = []
-        for p2_singleton_puzzle_hash, pool_dict in self.farmer.pool_state.items():
-            if pool_dict["pool_config"].pool_url == "":
-                # Self pooling
-                continue
+        try:
+            pool_difficulties: List[PoolDifficulty] = []
+            for p2_singleton_puzzle_hash, pool_dict in self.farmer.pool_state.items():
+                if pool_dict["pool_config"].pool_url == "":
+                    # Self pooling
+                    continue
 
-            if pool_dict["current_difficulty"] is None:
-                self.farmer.log.warning(
-                    f"No pool specific difficulty has been set for {p2_singleton_puzzle_hash}, "
-                    f"check communication with the pool, skipping this signage point, pool: "
-                    f"{pool_dict['pool_config'].pool_url} "
+                if pool_dict["current_difficulty"] is None:
+                    self.farmer.log.warning(
+                        f"No pool specific difficulty has been set for {p2_singleton_puzzle_hash}, "
+                        f"check communication with the pool, skipping this signage point, pool: "
+                        f"{pool_dict['pool_config'].pool_url} "
+                    )
+                    continue
+                pool_difficulties.append(
+                    PoolDifficulty(
+                        pool_dict["current_difficulty"],
+                        self.farmer.constants.POOL_SUB_SLOT_ITERS,
+                        p2_singleton_puzzle_hash,
+                    )
                 )
-                continue
-            pool_difficulties.append(
-                PoolDifficulty(
-                    pool_dict["current_difficulty"],
-                    self.farmer.constants.POOL_SUB_SLOT_ITERS,
-                    p2_singleton_puzzle_hash,
-                )
+            message = harvester_protocol.NewSignagePointHarvester(
+                new_signage_point.challenge_hash,
+                new_signage_point.difficulty,
+                new_signage_point.sub_slot_iters,
+                new_signage_point.signage_point_index,
+                new_signage_point.challenge_chain_sp,
+                pool_difficulties,
             )
-        message = harvester_protocol.NewSignagePointHarvester(
-            new_signage_point.challenge_hash,
-            new_signage_point.difficulty,
-            new_signage_point.sub_slot_iters,
-            new_signage_point.signage_point_index,
-            new_signage_point.challenge_chain_sp,
-            pool_difficulties,
-        )
 
-        msg = make_msg(ProtocolMessageTypes.new_signage_point_harvester, message)
-        await self.farmer.server.send_to_all([msg], NodeType.HARVESTER)
-        if new_signage_point.challenge_chain_sp not in self.farmer.sps:
-            self.farmer.sps[new_signage_point.challenge_chain_sp] = []
+            msg = make_msg(ProtocolMessageTypes.new_signage_point_harvester, message)
+            await self.farmer.server.send_to_all([msg], NodeType.HARVESTER)
+            if new_signage_point.challenge_chain_sp not in self.farmer.sps:
+                self.farmer.sps[new_signage_point.challenge_chain_sp] = []
+        finally:
+            # Age out old 24h information for every signage point regardless
+            # of any failures.  Note that this still lets old data remain if
+            # the client isn't receiving signage points.
+            cutoff_24h = time.time() - (24 * 60 * 60)
+            for p2_singleton_puzzle_hash, pool_dict in self.farmer.pool_state.items():
+                for key in ["points_found_24h", "points_acknowledged_24h"]:
+                    if key not in pool_dict:
+                        continue
+
+                    pool_dict[key] = strip_old_entries(pairs=pool_dict[key], before=cutoff_24h)
+
         if new_signage_point in self.farmer.sps[new_signage_point.challenge_chain_sp]:
             self.farmer.log.debug(f"Duplicate signage point {new_signage_point.signage_point_index}")
             return
 
-        self.last_challenge_time = int(time.time()*1000)
         self.farmer.sps[new_signage_point.challenge_chain_sp].append(new_signage_point)
         self.farmer.cache_add_time[new_signage_point.challenge_chain_sp] = uint64(int(time.time()))
         self.farmer.state_changed("new_signage_point", {"sp_hash": new_signage_point.challenge_chain_sp})
@@ -484,11 +510,11 @@ class FarmerAPI:
                     "proofs": request.proofs,
                     "total_plots": request.total_plots,
                     "timestamp": request.timestamp,
-                    "time_consuming": int(time.time()*1000)-self.last_challenge_time,
                 }
             },
         )
 
     @api_request
-    async def respond_plots(self, _: harvester_protocol.RespondPlots):
-        self.farmer.log.warning("Respond plots came too late")
+    @peer_required
+    async def respond_plots(self, _: harvester_protocol.RespondPlots, peer: ws.WSAppleConnection):
+        self.farmer.log.warning(f"Respond plots came too late from: {peer.get_peer_logging()}")

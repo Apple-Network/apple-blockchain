@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from typing import Any, List
 
+from clvm.casts import int_to_bytes
+
 from apple.types.blockchain_format.sized_bytes import bytes32
-from apple.util.clvm import int_to_bytes
 from apple.util.hash import std_hash
 from apple.util.ints import uint64
 from apple.util.streamable import Streamable, streamable
