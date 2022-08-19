@@ -10,8 +10,8 @@ from apple.util.ints import uint32
 from apple.util.streamable import Streamable, streamable
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class UnfinishedBlock(Streamable):
     # Full block, without the final VDFs
     finished_sub_slots: List[EndOfSubSlotBundle]  # If first sb

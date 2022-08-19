@@ -2,6 +2,7 @@
 import importlib
 import pathlib
 import platform
+import sysconfig
 
 from pkg_resources import get_distribution
 
@@ -18,7 +19,7 @@ def solve_name_collision_problem(analysis):
     There is a collision between the `apple` file name (which is the executable)
     and the `apple` directory, which contains non-code resources like `english.txt`.
     We move all the resources in the zipped area so there is no
-    need to create the `apple` directory, since the names collide.
+    need to create the `chia` directory, since the names collide.
 
     Fetching data now requires going into a zip file, so it will be slower.
     It's best if files that are used frequently are cached.
@@ -98,7 +99,7 @@ if THIS_IS_WINDOWS:
 
 if THIS_IS_WINDOWS:
     apple_mod = importlib.import_module("apple")
-    dll_paths = ROOT / "*.dll"
+    dll_paths = pathlib.Path(sysconfig.get_path("platlib")) / "*.dll"
 
     binaries = [
         (
@@ -188,6 +189,9 @@ add_binary("daemon", f"{ROOT}/apple/daemon/server.py", COLLECT_ARGS)
 
 for server in SERVERS:
     add_binary(f"start_{server}", f"{ROOT}/apple/server/start_{server}.py", COLLECT_ARGS)
+
+add_binary("start_crawler", f"{ROOT}/apple/seeder/start_crawler.py", COLLECT_ARGS)
+add_binary("start_seeder", f"{ROOT}/apple/seeder/dns_server.py", COLLECT_ARGS)
 
 COLLECT_KWARGS = dict(
     strip=False,

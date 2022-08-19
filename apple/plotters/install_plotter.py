@@ -4,7 +4,7 @@ from apple.plotters.madmax import install_madmax
 
 
 def install_plotter(plotter, root_path):
-    if plotter == "chiapos":
+    if plotter == "applepos":
         print("Applepos already installed. No action taken.")
         return
     elif plotter == "madmax":

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -o errexit
+
 if [ ! "$1" ]; then
   echo "This script requires either amd64 of arm64 as an argument"
 	exit 1
@@ -12,11 +14,8 @@ else
 	DIR_NAME="apple-blockchain-linux-arm64"
 fi
 
-pip install setuptools_scm
-# The environment variable APPLE_INSTALLER_VERSION needs to be defined
 # If the env variable NOTARIZE and the username and password variables are
 # set, this will attempt to Notarize the signed DMG
-APPLE_INSTALLER_VERSION=$(python installer-version.py)
 
 if [ ! "$APPLE_INSTALLER_VERSION" ]; then
 	echo "WARNING: No environment variable APPLE_INSTALLER_VERSION set. Using 0.0.0."
@@ -36,7 +35,6 @@ rm -rf dist
 mkdir dist
 
 echo "Create executables with pyinstaller"
-pip install pyinstaller==4.9
 SPEC_FILE=$(python -c 'import apple; print(apple.PYINSTALLER_SPEC_PATH)')
 pyinstaller --log-level=INFO "$SPEC_FILE"
 LAST_EXIT_CODE=$?
@@ -44,6 +42,31 @@ if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	echo >&2 "pyinstaller failed!"
 	exit $LAST_EXIT_CODE
 fi
+
+# Builds CLI only rpm
+CLI_RPM_BASE="apple-blockchain-cli-$APPLE_INSTALLER_VERSION-1.$REDHAT_PLATFORM"
+mkdir -p "dist/$CLI_RPM_BASE/opt/apple"
+mkdir -p "dist/$CLI_RPM_BASE/usr/bin"
+cp -r dist/daemon/* "dist/$CLI_RPM_BASE/opt/apple/"
+ln -s ../../opt/apple/apple "dist/$CLI_RPM_BASE/usr/bin/apple"
+# This is built into the base build image
+# shellcheck disable=SC1091
+. /etc/profile.d/rvm.sh
+rvm use ruby-3
+# /usr/lib64/libcrypt.so.1 is marked as a dependency specifically because newer versions of fedora bundle
+# libcrypt.so.2 by default, and the libxcrypt-compat package needs to be installed for the other version
+# Marking as a dependency allows yum/dnf to automatically install the libxcrypt-compat package as well
+fpm -s dir -t rpm \
+  -C "dist/$CLI_RPM_BASE" \
+  -p "dist/$CLI_RPM_BASE.rpm" \
+  --name apple-blockchain-cli \
+  --license Apache-2.0 \
+  --version "$APPLE_INSTALLER_VERSION" \
+  --architecture "$REDHAT_PLATFORM" \
+  --description "Apple is a modern cryptocurrency built from scratch, designed to be efficient, decentralized, and secure." \
+  --depends /usr/lib64/libcrypt.so.1 \
+  .
+# CLI only rpm done
 
 cp -r dist/daemon ../apple-blockchain-gui/packages/gui
 cd .. || exit
@@ -69,7 +92,7 @@ cp package.json package.json.orig
 jq --arg VER "$APPLE_INSTALLER_VERSION" '.version=$VER' package.json > temp.json && mv temp.json package.json
 
 electron-packager . apple-blockchain --asar.unpack="**/daemon/**" --platform=linux \
---icon=src/assets/img/Apple.icns --overwrite --app-bundle-id=in.applecoin.blockchain \
+--icon=src/assets/img/Apple.icns --overwrite --app-bundle-id=top.apple.blockchain \
 --appVersion=$APPLE_INSTALLER_VERSION --executable-name=apple-blockchain
 LAST_EXIT_CODE=$?
 
@@ -110,5 +133,8 @@ if [ "$REDHAT_PLATFORM" = "x86_64" ]; then
 	  exit $LAST_EXIT_CODE
   fi
 fi
+
+# Move the cli only rpm into final installers as well, so it gets uploaded as an artifact
+mv "dist/$CLI_RPM_BASE.rpm" final_installer/
 
 ls final_installer/

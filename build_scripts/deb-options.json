@@ -1,0 +1,9 @@
+{
+  "dest": "final_installer/",
+  "bin": "apple-blockchain",
+  "name": "apple-blockchain",
+  "scripts": {
+    "postinst": "assets/deb/postinst.sh",
+    "prerm": "assets/deb/prerm.sh"
+  }
+}

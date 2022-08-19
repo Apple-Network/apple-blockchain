@@ -38,26 +38,32 @@ and in this way they control whether a spend is valid or not.
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import Dict, List, Tuple
 
 import click
-
-from clvm_rs import COND_CANON_INTS, NO_NEG_DIV
+from chia_rs import COND_CANON_INTS, NO_NEG_DIV
+from clvm.casts import int_from_bytes
 
 from apple.consensus.constants import ConsensusConstants
 from apple.consensus.default_constants import DEFAULT_CONSTANTS
 from apple.full_node.generator import create_generator_args
-from apple.types.blockchain_format.program import SerializedProgram
 from apple.types.blockchain_format.coin import Coin
+from apple.types.blockchain_format.program import SerializedProgram
+from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.types.condition_opcodes import ConditionOpcode
 from apple.types.condition_with_args import ConditionWithArgs
 from apple.types.generator_types import BlockGenerator
-from apple.types.name_puzzle_condition import NPC
 from apple.util.config import load_config
 from apple.util.default_root import DEFAULT_ROOT_PATH
 from apple.util.ints import uint32, uint64
 from apple.wallet.cat_wallet.cat_utils import match_cat_puzzle
-from clvm.casts import int_from_bytes
+
+
+@dataclass
+class NPC:
+    coin_name: bytes32
+    puzzle_hash: bytes32
+    conditions: List[Tuple[ConditionOpcode, List[ConditionWithArgs]]]
 
 
 @dataclass

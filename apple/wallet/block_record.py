@@ -6,8 +6,8 @@ from apple.types.header_block import HeaderBlock
 from apple.util.streamable import Streamable, streamable
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class HeaderBlockRecord(Streamable):
     """
     These are values that are stored in the wallet database, corresponding to information

@@ -30,8 +30,10 @@ from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.types.peer_info import PeerInfo
 from apple.util.errors import Err, ProtocolError
 from apple.util.ints import uint16
-from apple.util.network import is_in_network, is_localhost
+from apple.util.network import is_in_network, is_localhost, select_port
 from apple.util.ssl_check import verify_ssl_certs_and_keys
+
+max_message_size = 50 * 1024 * 1024  # 50MB
 
 
 def ssl_context_for_server(
@@ -42,11 +44,11 @@ def ssl_context_for_server(
     *,
     check_permissions: bool = True,
     log: Optional[logging.Logger] = None,
-) -> Optional[ssl.SSLContext]:
+) -> ssl.SSLContext:
     if check_permissions:
         verify_ssl_certs_and_keys([ca_cert, private_cert_path], [ca_key, private_key_path], log)
 
-    ssl_context = ssl._create_unverified_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=str(ca_cert))
+    ssl_context = ssl._create_unverified_context(purpose=ssl.Purpose.CLIENT_AUTH, cafile=str(ca_cert))
     ssl_context.check_hostname = False
     ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
     ssl_context.set_ciphers(
@@ -70,7 +72,7 @@ def ssl_context_for_server(
 
 def ssl_context_for_root(
     ca_cert_file: str, *, check_permissions: bool = True, log: Optional[logging.Logger] = None
-) -> Optional[ssl.SSLContext]:
+) -> ssl.SSLContext:
     if check_permissions:
         verify_ssl_certs_and_keys([Path(ca_cert_file)], [], log)
 
@@ -86,7 +88,7 @@ def ssl_context_for_client(
     *,
     check_permissions: bool = True,
     log: Optional[logging.Logger] = None,
-) -> Optional[ssl.SSLContext]:
+) -> ssl.SSLContext:
     if check_permissions:
         verify_ssl_certs_and_keys([ca_cert, private_cert_path], [ca_key, private_key_path], log)
 
@@ -261,13 +263,23 @@ class AppleServer:
                 self.apple_ca_crt_path, self.apple_ca_key_path, self.p2p_crt_path, self.p2p_key_path, log=self.log
             )
 
+        # If self._port is set to zero, the socket will bind to a new available port. Therefore, we have to obtain
+        # this port from the socket itself and update self._port.
         self.site = web.TCPSite(
             self.runner,
-            port=self._port,
+            host="",  # should listen to both IPv4 and IPv6 on a dual-stack system
+            port=int(self._port),
             shutdown_timeout=3,
             ssl_context=ssl_context,
         )
         await self.site.start()
+        #
+        # On a dual-stack system, we want to get the (first) IPv4 port unless
+        # prefer_ipv6 is set in which case we use the IPv6 port
+        #
+        if self._port == 0:
+            self._port = select_port(self.root_path, self.runner.addresses)
+
         self.log.info(f"Started listening on port: {self._port}")
 
     async def incoming_connection(self, request):
@@ -277,7 +289,7 @@ class AppleServer:
         if request.remote in self.banned_peers and time.time() < self.banned_peers[request.remote]:
             self.log.warning(f"Peer {request.remote} is banned, refusing connection")
             return None
-        ws = web.WebSocketResponse(max_msg_size=50 * 1024 * 1024)
+        ws = web.WebSocketResponse(max_msg_size=max_message_size)
         await ws.prepare(request)
         close_event = asyncio.Event()
         cert_bytes = request.transport._ssl_protocol._extra["ssl_object"].getpeercert(True)
@@ -302,14 +314,13 @@ class AppleServer:
                 self._outbound_rate_limit_percent,
                 close_event,
             )
-            handshake = await connection.perform_handshake(
+            await connection.perform_handshake(
                 self._network_id,
                 protocol_version,
                 self._port,
                 self._local_type,
             )
 
-            assert handshake is True
             # Limit inbound connections to config's specifications.
             if not self.accept_inbound_connections(connection.connection_type) and not is_in_network(
                 connection.peer_host, self.exempt_peer_networks
@@ -422,7 +433,7 @@ class AppleServer:
             self.log.debug(f"Connecting: {url}, Peer info: {target_node}")
             try:
                 ws = await session.ws_connect(
-                    url, autoclose=True, autoping=True, heartbeat=60, ssl=ssl_context, max_msg_size=50 * 1024 * 1024
+                    url, autoclose=True, autoping=True, heartbeat=60, ssl=ssl_context, max_msg_size=max_message_size
                 )
             except ServerDisconnectedError:
                 self.log.debug(f"Server disconnected error connecting to {url}. Perhaps we are banned by the peer.")
@@ -456,13 +467,12 @@ class AppleServer:
                 self._outbound_rate_limit_percent,
                 session=session,
             )
-            handshake = await connection.perform_handshake(
+            await connection.perform_handshake(
                 self._network_id,
                 protocol_version,
                 self._port,
                 self._local_type,
             )
-            assert handshake is True
             await self.connection_added(connection, on_connect)
             # the session has been adopted by the connection, don't close it at
             # the end of the function
@@ -632,16 +642,12 @@ class AppleServer:
                     if task_id in self.execute_tasks:
                         self.execute_tasks.remove(task_id)
 
-            task_id = token_bytes()
+            task_id: bytes32 = bytes32(token_bytes(32))
             api_task = asyncio.create_task(api_call(payload_inc, connection_inc, task_id))
-            # TODO: address hint error and remove ignore
-            #       error: Invalid index type "bytes" for "Dict[bytes32, Task[Any]]"; expected type "bytes32"  [index]
-            self.api_tasks[task_id] = api_task  # type: ignore[index]
+            self.api_tasks[task_id] = api_task
             if connection_inc.peer_node_id not in self.tasks_from_peer:
                 self.tasks_from_peer[connection_inc.peer_node_id] = set()
-            # TODO: address hint error and remove ignore
-            #       error: Argument 1 to "add" of "set" has incompatible type "bytes"; expected "bytes32"  [arg-type]
-            self.tasks_from_peer[connection_inc.peer_node_id].add(task_id)  # type: ignore[arg-type]
+            self.tasks_from_peer[connection_inc.peer_node_id].add(task_id)
 
     async def send_to_others(
         self,
@@ -757,34 +763,25 @@ class AppleServer:
         ip = None
         port = self._port
 
-        # Use apple's service first.
+        # Fallback to `checkip` from amazon.
         try:
             timeout = ClientTimeout(total=15)
             async with ClientSession(timeout=timeout) as session:
-                async with session.get("https://ip.applecoin.in/") as resp:
+                async with session.get("https://checkip.amazonaws.com/") as resp:
                     if resp.status == 200:
                         ip = str(await resp.text())
                         ip = ip.rstrip()
         except Exception:
             ip = None
-
-        # Fallback to `checkip` from amazon.
-        if ip is None:
-            try:
-                timeout = ClientTimeout(total=15)
-                async with ClientSession(timeout=timeout) as session:
-                    async with session.get("https://checkip.amazonaws.com/") as resp:
-                        if resp.status == 200:
-                            ip = str(await resp.text())
-                            ip = ip.rstrip()
-            except Exception:
-                ip = None
         if ip is None:
             return None
         peer = PeerInfo(ip, uint16(port))
         if not peer.is_valid():
             return None
         return peer
+
+    def get_port(self) -> uint16:
+        return uint16(self._port)
 
     def accept_inbound_connections(self, node_type: NodeType) -> bool:
         if not self._local_type == NodeType.FULL_NODE:

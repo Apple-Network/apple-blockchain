@@ -40,7 +40,7 @@ class WalletPuzzleStore:
                 "CREATE TABLE IF NOT EXISTS derivation_paths("
                 "derivation_index int,"
                 " pubkey text,"
-                " puzzle_hash text PRIMARY_KEY,"
+                " puzzle_hash text PRIMARY KEY,"
                 " wallet_type int,"
                 " wallet_id int,"
                 " used tinyint,"
@@ -57,7 +57,9 @@ class WalletPuzzleStore:
 
         await self.db_connection.execute("CREATE INDEX IF NOT EXISTS wallet_type on derivation_paths(wallet_type)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS wallet_id on derivation_paths(wallet_id)")
+        await self.db_connection.execute(
+            "CREATE INDEX IF NOT EXISTS derivation_paths_wallet_id on derivation_paths(wallet_id)"
+        )
 
         await self.db_connection.execute("CREATE INDEX IF NOT EXISTS used on derivation_paths(wallet_type)")
 
@@ -88,6 +90,7 @@ class WalletPuzzleStore:
         try:
             sql_records = []
             for record in records:
+                log.debug("Adding derivation record: %s", record)
                 self.all_puzzle_hashes.add(record.puzzle_hash)
                 if record.hardened:
                     hardened = 1
