@@ -1,13 +1,15 @@
-from blspy import G1Element
+from __future__ import annotations
+
+from chia_rs import G1Element
 
 from apple.types.blockchain_format.coin import Coin
 from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.util.ints import uint32, uint64
-from apple.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import puzzle_for_pk
+from apple.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import puzzle_hash_for_pk
 
 
 def create_puzzlehash_for_pk(pub_key: G1Element) -> bytes32:
-    return puzzle_for_pk(pub_key).get_tree_hash()
+    return puzzle_hash_for_pk(pub_key)
 
 
 def pool_parent_id(block_height: uint32, genesis_challenge: bytes32) -> bytes32:

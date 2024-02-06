@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from apple.util.ints import uint32, uint64
 
 # 1 Apple coin = 1,000,000,000,000 = 1 trillion mojo.

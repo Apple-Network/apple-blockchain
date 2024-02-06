@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from typing import List, Optional
 
 from typing_extensions import Protocol
 
-from apple.types.blockchain_format.program import SerializedProgram
+from apple.types.blockchain_format.serialized_program import SerializedProgram
 from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.util.ints import uint32
 

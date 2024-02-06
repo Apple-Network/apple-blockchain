@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -11,7 +13,7 @@ from typing_extensions import Protocol
 from apple.plot_sync.exceptions import AlreadyStartedError, InvalidConnectionTypeError
 from apple.plot_sync.util import Constants
 from apple.plotting.manager import PlotManager
-from apple.plotting.util import PlotInfo
+from apple.plotting.util import HarvestingMode, PlotInfo
 from apple.protocols.harvester_protocol import (
     Plot,
     PlotSyncDone,
@@ -21,9 +23,11 @@ from apple.protocols.harvester_protocol import (
     PlotSyncResponse,
     PlotSyncStart,
 )
-from apple.server.ws_connection import NodeType, ProtocolMessageTypes, WSAppleConnection, make_msg
-from apple.util.generator_tools import list_to_batches
+from apple.protocols.protocol_message_types import ProtocolMessageTypes
+from apple.server.outbound_message import NodeType, make_msg
+from apple.server.ws_connection import WSAppleConnection
 from apple.util.ints import int16, uint32, uint64
+from apple.util.misc import to_batches
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ def _convert_plot_info_list(plot_infos: List[PlotInfo]) -> List[Plot]:
                 plot_public_key=plot_info.plot_public_key,
                 file_size=uint64(plot_info.file_size),
                 time_modified=uint64(int(plot_info.time_modified)),
+                compression_level=plot_info.prover.get_compression_level(),
             )
         )
     return converted
@@ -49,6 +54,9 @@ def _convert_plot_info_list(plot_infos: List[PlotInfo]) -> List[Plot]:
 class PayloadType(Protocol):
     def __init__(self, identifier: PlotSyncIdentifier, *args: object) -> None:
         ...
+
+    def __bytes__(self) -> bytes:
+        pass
 
 
 T = TypeVar("T", bound=PayloadType)
@@ -89,10 +97,11 @@ class Sender:
     _messages: List[MessageGenerator[PayloadType]]
     _last_sync_id: uint64
     _stop_requested = False
-    _task: Optional[asyncio.Task]  # type: ignore[type-arg]  # Asks for Task parameter which doesn't work
+    _task: Optional[asyncio.Task[None]]
     _response: Optional[ExpectedResponse]
+    _harvesting_mode: HarvestingMode
 
-    def __init__(self, plot_manager: PlotManager) -> None:
+    def __init__(self, plot_manager: PlotManager, harvesting_mode: HarvestingMode) -> None:
         self._plot_manager = plot_manager
         self._connection = None
         self._sync_id = uint64(0)
@@ -102,6 +111,7 @@ class Sender:
         self._stop_requested = False
         self._task = None
         self._response = None
+        self._harvesting_mode = harvesting_mode
 
     def __str__(self) -> str:
         return f"sync_id {self._sync_id}, next_message_id {self._next_message_id}, messages {len(self._messages)}"
@@ -111,8 +121,7 @@ class Sender:
             await self.await_closed()
         if self._task is None:
             self._task = asyncio.create_task(self._run())
-            # TODO, Add typing in PlotManager
-            if not self._plot_manager.initial_refresh() or self._sync_id != 0:  # type:ignore[no-untyped-call]
+            if not self._plot_manager.initial_refresh() or self._sync_id != 0:
                 self._reset()
         else:
             raise AlreadyStartedError()
@@ -143,12 +152,11 @@ class Sender:
         self._next_message_id = uint64(0)
         self._messages.clear()
         if self._task is not None:
-            # TODO, Add typing in PlotManager
-            self.sync_start(self._plot_manager.plot_count(), True)  # type:ignore[no-untyped-call]
-            for remaining, batch in list_to_batches(
+            self.sync_start(self._plot_manager.plot_count(), True)
+            for batch in to_batches(
                 list(self._plot_manager.plots.values()), self._plot_manager.refresh_parameter.batch_size
             ):
-                self.process_batch(batch, remaining)
+                self.process_batch(batch.entries, batch.remaining)
             self.sync_done([], 0)
 
     async def _wait_for_response(self) -> bool:
@@ -167,7 +175,7 @@ class Sender:
             return False
         if response.identifier.sync_id != self._response.identifier.sync_id:
             log.warning(
-                "set_response unexpected sync-id: " f"{response.identifier.sync_id}/{self._response.identifier.sync_id}"
+                "set_response unexpected sync-id: {response.identifier.sync_id}/{self._response.identifier.sync_id}"
             )
             return False
         if response.identifier.message_id != self._response.identifier.message_id:
@@ -178,7 +186,7 @@ class Sender:
             return False
         if response.message_type != int16(self._response.message_type.value):
             log.warning(
-                "set_response unexpected message-type: " f"{response.message_type}/{self._response.message_type.value}"
+                "set_response unexpected message-type: {response.message_type}/{self._response.message_type.value}"
             )
             return False
         log.debug(f"set_response valid {response}")
@@ -246,8 +254,8 @@ class Sender:
         if len(data) == 0:
             self._add_message(message_type, payload_type, [], True)
             return
-        for remaining, batch in list_to_batches(data, self._plot_manager.refresh_parameter.batch_size):
-            self._add_message(message_type, payload_type, batch, remaining == 0)
+        for batch in to_batches(data, self._plot_manager.refresh_parameter.batch_size):
+            self._add_message(message_type, payload_type, batch.entries, batch.remaining == 0)
 
     def sync_start(self, count: float, initial: bool) -> None:
         log.debug(f"sync_start {self}: count {count}, initial {initial}")
@@ -263,7 +271,12 @@ class Sender:
         log.debug(f"sync_start {sync_id}")
         self._sync_id = uint64(sync_id)
         self._add_message(
-            ProtocolMessageTypes.plot_sync_start, PlotSyncStart, initial, self._last_sync_id, uint32(int(count))
+            ProtocolMessageTypes.plot_sync_start,
+            PlotSyncStart,
+            initial,
+            self._last_sync_id,
+            uint32(int(count)),
+            self._harvesting_mode,
         )
 
     def process_batch(self, loaded: List[PlotInfo], remaining: int) -> None:
@@ -284,8 +297,7 @@ class Sender:
         self._add_list_batched(ProtocolMessageTypes.plot_sync_invalid, PlotSyncPathList, failed_to_open_list)
         no_key_list = [str(x) for x in self._plot_manager.no_key_filenames]
         self._add_list_batched(ProtocolMessageTypes.plot_sync_keys_missing, PlotSyncPathList, no_key_list)
-        # TODO, Add typing in PlotManager
-        duplicates_list: List[str] = self._plot_manager.get_duplicates().copy()  # type:ignore[no-untyped-call]
+        duplicates_list = self._plot_manager.get_duplicates().copy()
         self._add_list_batched(ProtocolMessageTypes.plot_sync_duplicates, PlotSyncPathList, duplicates_list)
         self._add_message(ProtocolMessageTypes.plot_sync_done, PlotSyncDone, uint64(int(duration)))
 

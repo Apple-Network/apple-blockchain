@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
-from blspy import G1Element
+from chia_rs import G1Element
 
 from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.util.ints import uint32

@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from typing import Any
 
 from apple.plot_sync.util import ErrorCodes, State
 from apple.protocols.harvester_protocol import PlotSyncIdentifier
-from apple.server.ws_connection import NodeType
+from apple.server.outbound_message import NodeType
 from apple.util.ints import uint64
 
 

@@ -1,14 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from apple.types.blockchain_format.sized_bytes import bytes32
-from apple.util.ints import uint64
-from apple.util.streamable import streamable, Streamable
-from apple.wallet.lineage_proof import LineageProof
-from apple.types.blockchain_format.program import Program
+from apple.protocols.wallet_protocol import CoinState
 from apple.types.blockchain_format.coin import Coin
-
-DID_HRP = "did:apple:"
+from apple.types.blockchain_format.program import Program
+from apple.types.blockchain_format.sized_bytes import bytes32
+from apple.util.ints import uint16, uint64
+from apple.util.streamable import Streamable, streamable
+from apple.wallet.lineage_proof import LineageProof
 
 
 @streamable
@@ -24,3 +25,15 @@ class DIDInfo(Streamable):
     temp_pubkey: Optional[bytes]
     sent_recovery_transaction: bool
     metadata: str  # JSON of the user defined metadata
+
+
+@streamable
+@dataclass(frozen=True)
+class DIDCoinData(Streamable):
+    p2_puzzle: Program
+    recovery_list_hash: bytes32
+    num_verification: uint16
+    singleton_struct: Program
+    metadata: Program
+    inner_puzzle: Optional[Program]
+    coin_state: CoinState

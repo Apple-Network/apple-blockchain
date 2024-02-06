@@ -3,5 +3,5 @@
 
 set -e
 
-ln -s /usr/lib/apple-blockchain/resources/app.asar.unpacked/daemon/apple /usr/bin/apple || true
-ln -s /usr/lib/apple-blockchain/resources/app.asar.unpacked/daemon /opt/apple || true
+ln -s /opt/apple/resources/app.asar.unpacked/daemon/apple /usr/bin/apple || true
+ln -s /opt/apple/apple-blockchain /usr/bin/apple-blockchain || true

@@ -4,25 +4,31 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Type, TypeVar
 
+from apple.protocols.wallet_protocol import CoinState
 from apple.types.blockchain_format.program import Program
 from apple.types.blockchain_format.sized_bytes import bytes32
+from apple.types.coin_spend import CoinSpend
 from apple.util.ints import uint16
-from apple.wallet.puzzles.load_clvm import load_clvm
+from apple.util.streamable import Streamable, streamable
+from apple.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 
 log = logging.getLogger(__name__)
-SINGLETON_TOP_LAYER_MOD = load_clvm("singleton_top_layer_v1_1.clvm")
-NFT_MOD = load_clvm("nft_state_layer.clvm")
-NFT_OWNERSHIP_LAYER = load_clvm("nft_ownership_layer.clvm")
+SINGLETON_TOP_LAYER_MOD = load_clvm_maybe_recompile("singleton_top_layer_v1_1.clsp")
+NFT_MOD = load_clvm_maybe_recompile("nft_state_layer.clsp", package_or_requirement="apple.wallet.nft_wallet.puzzles")
+NFT_OWNERSHIP_LAYER = load_clvm_maybe_recompile(
+    "nft_ownership_layer.clsp", package_or_requirement="apple.wallet.nft_wallet.puzzles"
+)
 
 _T_UncurriedNFT = TypeVar("_T_UncurriedNFT", bound="UncurriedNFT")
 
 
+@streamable
 @dataclass(frozen=True)
-class UncurriedNFT:
+class UncurriedNFT(Streamable):
     """
     A simple solution for uncurry NFT puzzle.
     Initial the class with a full NFT puzzle, it will do a deep uncurry.
-    This is the only place you need to change after modified the Applelisp curried parameters.
+    This is the only place you need to change after modified the Chialisp curried parameters.
     """
 
     nft_mod_hash: bytes32
@@ -54,8 +60,8 @@ class UncurriedNFT:
     meta_hash: Program
     license_uris: Program
     license_hash: Program
-    series_number: Program
-    series_total: Program
+    edition_number: Program
+    edition_total: Program
 
     inner_puzzle: Program
     """NFT state layer inner puzzle"""
@@ -85,27 +91,30 @@ class UncurriedNFT:
     trade_price_percentage: Optional[uint16]
 
     @classmethod
-    def uncurry(cls: Type[_T_UncurriedNFT], puzzle: Program) -> UncurriedNFT:
+    def uncurry(cls: Type[_T_UncurriedNFT], mod: Program, curried_args: Program) -> Optional[_T_UncurriedNFT]:
         """
         Try to uncurry a NFT puzzle
         :param cls UncurriedNFT class
-        :param puzzle: Puzzle program
+        :param mod: uncurried Puzzle program
+        :param uncurried_args: uncurried arguments to program
         :return Uncurried NFT
         """
-        mod, curried_args = puzzle.uncurry()
         if mod != SINGLETON_TOP_LAYER_MOD:
-            raise ValueError(f"Cannot uncurry NFT puzzle, failed on singleton top layer: Mod {mod}")
+            log.debug("Cannot uncurry NFT puzzle, failed on singleton top layer: Mod %s", mod)
+            return None
         try:
             (singleton_struct, nft_state_layer) = curried_args.as_iter()
             singleton_mod_hash = singleton_struct.first()
             singleton_launcher_id = singleton_struct.rest().first()
             launcher_puzhash = singleton_struct.rest().rest()
         except ValueError as e:
-            raise ValueError(f"Cannot uncurry singleton top layer: Args {curried_args}") from e
+            log.debug("Cannot uncurry singleton top layer: Args %s error: %s", curried_args, e)
+            return None
 
         mod, curried_args = curried_args.rest().first().uncurry()
         if mod != NFT_MOD:
-            raise ValueError(f"Cannot uncurry NFT puzzle, failed on NFT state layer: Mod {mod}")
+            log.debug("Cannot uncurry NFT puzzle, failed on NFT state layer: Mod %s", mod)
+            return None
         try:
             # Set nft parameters
             nft_mod_hash, metadata, metadata_updater_hash, inner_puzzle = curried_args.as_iter()
@@ -115,8 +124,8 @@ class UncurriedNFT:
             meta_hash = Program.to(0)
             license_uris = Program.to([])
             license_hash = Program.to(0)
-            series_number = Program.to(1)
-            series_total = Program.to(1)
+            edition_number = Program.to(1)
+            edition_total = Program.to(1)
             # Set metadata
             for kv_pair in metadata.as_iter():
                 if kv_pair.first().as_atom() == b"u":
@@ -132,9 +141,9 @@ class UncurriedNFT:
                 if kv_pair.first().as_atom() == b"lh":
                     license_hash = kv_pair.rest()
                 if kv_pair.first().as_atom() == b"sn":
-                    series_number = kv_pair.rest()
+                    edition_number = kv_pair.rest()
                 if kv_pair.first().as_atom() == b"st":
-                    series_total = kv_pair.rest()
+                    edition_total = kv_pair.rest()
             current_did = None
             transfer_program = None
             transfer_program_args = None
@@ -159,9 +168,11 @@ class UncurriedNFT:
                 log.debug("Creating a standard NFT puzzle")
                 p2_puzzle = inner_puzzle
         except Exception as e:
-            raise ValueError(f"Cannot uncurry NFT state layer: Args {curried_args}") from e
+            log.debug("Cannot uncurry NFT state layer: Args %s Error: %s", curried_args, e)
+            return None
+
         return cls(
-            nft_mod_hash=nft_mod_hash,
+            nft_mod_hash=bytes32(nft_mod_hash.atom),
             nft_state_layer=nft_state_layer,
             singleton_struct=singleton_struct,
             singleton_mod_hash=singleton_mod_hash,
@@ -176,8 +187,8 @@ class UncurriedNFT:
             meta_hash=meta_hash,
             license_uris=license_uris,
             license_hash=license_hash,
-            series_number=series_number,
-            series_total=series_total,
+            edition_number=edition_number,
+            edition_total=edition_total,
             inner_puzzle=inner_puzzle,
             owner_did=current_did,
             supports_did=supports_did,
@@ -194,3 +205,11 @@ class UncurriedNFT:
             return state_layer_inner_solution.first()  # type: ignore
         else:
             return state_layer_inner_solution
+
+
+@streamable
+@dataclass(frozen=True)
+class NFTCoinData(Streamable):
+    uncurried_nft: UncurriedNFT
+    parent_coin_state: CoinState
+    parent_coin_spend: CoinSpend

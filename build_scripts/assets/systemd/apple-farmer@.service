@@ -1,0 +1,16 @@
+[Unit]
+Description=Apple Farmer Service for %i
+Requires=apple-daemon@%i.service
+After=apple-daemon@%i.service
+
+[Service]
+Type=simple
+Environment=APPLE_ROOT=/home/%i/.apple/mainnet
+ExecStart=/opt/apple/start_farmer
+User=%i
+Group=%i
+LimitNOFILE=1048576
+LimitNPROC=1048576
+
+[Install]
+WantedBy=multi-user.target

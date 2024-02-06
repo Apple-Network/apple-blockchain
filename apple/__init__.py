@@ -1,9 +1,10 @@
-from pkg_resources import DistributionNotFound, get_distribution, resource_filename
+from __future__ import annotations
 
+import importlib.metadata
+
+__version__: str
 try:
-    __version__ = get_distribution("apple-blockchain").version
-except DistributionNotFound:
+    __version__ = importlib.metadata.version("apple-blockchain")
+except importlib.metadata.PackageNotFoundError:
     # package is not installed
     __version__ = "unknown"
-
-PYINSTALLER_SPEC_PATH = resource_filename("apple", "pyinstaller.spec")

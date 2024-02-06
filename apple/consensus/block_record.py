@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional
+
+from typing_extensions import Protocol
 
 from apple.consensus.constants import ConsensusConstants
 from apple.consensus.pot_iterations import calculate_ip_iters, calculate_sp_iters
@@ -9,6 +13,32 @@ from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.types.blockchain_format.sub_epoch_summary import SubEpochSummary
 from apple.util.ints import uint8, uint32, uint64, uint128
 from apple.util.streamable import Streamable, streamable
+
+
+class BlockRecordProtocol(Protocol):
+    @property
+    def header_hash(self) -> bytes32:
+        ...
+
+    @property
+    def height(self) -> uint32:
+        ...
+
+    @property
+    def timestamp(self) -> Optional[uint64]:
+        ...
+
+    @property
+    def prev_transaction_block_height(self) -> uint32:
+        ...
+
+    @property
+    def prev_transaction_block_hash(self) -> Optional[bytes32]:
+        ...
+
+    @property
+    def is_transaction_block(self) -> bool:
+        return self.timestamp is not None
 
 
 @streamable

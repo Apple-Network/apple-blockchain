@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from apple.consensus.constants import ConsensusConstants
 from apple.consensus.pos_quality import _expected_plot_size
 from apple.types.blockchain_format.sized_bytes import bytes32

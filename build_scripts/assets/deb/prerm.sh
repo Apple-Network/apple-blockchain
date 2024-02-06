@@ -4,4 +4,4 @@
 set -e
 
 unlink /usr/bin/apple || true
-unlink /opt/apple || true
+unlink /usr/bin/apple-blockchain || true

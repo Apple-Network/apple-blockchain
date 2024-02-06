@@ -1,0 +1,17 @@
+[Unit]
+Description=Apple Data Layer Service for %i
+Requires=apple-daemon@%i.service
+After=apple-daemon@%i.service
+
+[Service]
+Type=simple
+Environment=APPLE_ROOT=/home/%i/.apple/mainnet
+ExecStart=/opt/apple/start_data_layer
+User=%i
+Group=%i
+LimitNOFILE=1048576
+LimitNPROC=1048576
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

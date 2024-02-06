@@ -1,20 +1,34 @@
-import dataclasses
-from typing import List, Tuple, Iterator
+from __future__ import annotations
 
-from blspy import G2Element
+import dataclasses
+from typing import Iterator, List, Optional
+
+from chia_rs import G2Element
 
 from apple.types.blockchain_format.coin import Coin, coin_as_list
-from apple.types.blockchain_format.program import Program, INFINITE_COST
+from apple.types.blockchain_format.program import INFINITE_COST, Program
 from apple.types.blockchain_format.sized_bytes import bytes32
+from apple.types.coin_spend import CoinSpend
 from apple.types.condition_opcodes import ConditionOpcode
-from apple.types.spend_bundle import CoinSpend, SpendBundle
+from apple.types.spend_bundle import SpendBundle
 from apple.util.condition_tools import conditions_dict_for_solution
 from apple.wallet.lineage_proof import LineageProof
-from apple.wallet.puzzles.cat_loader import CAT_MOD
+from apple.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
+from apple.wallet.uncurried_puzzle import UncurriedPuzzle
 
 NULL_SIGNATURE = G2Element()
 
 ANYONE_CAN_SPEND_PUZZLE = Program.to(1)  # simply return the conditions
+CAT_MOD = load_clvm_maybe_recompile("cat_v2.clsp", package_or_requirement="apple.wallet.cat_wallet.puzzles")
+CAT_MOD_HASH = CAT_MOD.get_tree_hash()
+CAT_MOD_HASH_HASH: bytes32 = Program.to(CAT_MOD_HASH).get_tree_hash()
+
+
+def empty_program() -> Program:
+    # ignoring hint error here for:
+    # https://github.com/Apple-Network/clvm/pull/102
+    # https://github.com/Apple-Network/clvm/pull/106
+    return Program.to([])  # type: ignore[no-any-return]
 
 
 # information needed to spend a cc
@@ -24,39 +38,44 @@ class SpendableCAT:
     limitations_program_hash: bytes32
     inner_puzzle: Program
     inner_solution: Program
-    limitations_solution: Program = Program.to([])
+    limitations_solution: Program = dataclasses.field(default_factory=empty_program)
     lineage_proof: LineageProof = LineageProof()
     extra_delta: int = 0
-    limitations_program_reveal: Program = Program.to([])
+    limitations_program_reveal: Program = dataclasses.field(default_factory=empty_program)
 
 
-def match_cat_puzzle(puzzle: Program) -> Tuple[bool, Iterator[Program]]:
+def match_cat_puzzle(puzzle: UncurriedPuzzle) -> Optional[Iterator[Program]]:
     """
-    Given a puzzle test if it's a CAT and, if it is, return the curried arguments
+    Given the curried puzzle and args, test if it's a CAT and,
+    if it is, return the curried arguments
     """
-    mod, curried_args = puzzle.uncurry()
-    if mod == CAT_MOD:
-        return True, curried_args.as_iter()
+    if puzzle.mod == CAT_MOD:
+        ret: Iterator[Program] = puzzle.args.as_iter()
+        return ret
     else:
-        return False, iter(())
+        return None
 
 
 def get_innerpuzzle_from_puzzle(puzzle: Program) -> Program:
     mod, curried_args = puzzle.uncurry()
     if mod == CAT_MOD:
-        return curried_args.rest().rest().first()
+        return curried_args.at("rrf")
     else:
         raise ValueError("Not a CAT puzzle")
 
 
-def construct_cat_puzzle(mod_code: Program, limitations_program_hash: bytes32, inner_puzzle: Program) -> Program:
+def construct_cat_puzzle(
+    mod_code: Program, limitations_program_hash: bytes32, inner_puzzle: Program, mod_code_hash: Optional[bytes32] = None
+) -> Program:
     """
     Given an inner puzzle hash and tail hash calculate a puzzle program for a specific cc.
     """
-    return mod_code.curry(mod_code.get_tree_hash(), limitations_program_hash, inner_puzzle)
+    if mod_code_hash is None:
+        mod_code_hash = mod_code.get_tree_hash()
+    return mod_code.curry(mod_code_hash, limitations_program_hash, inner_puzzle)
 
 
-def subtotals_for_deltas(deltas) -> List[int]:
+def subtotals_for_deltas(deltas: List[int]) -> List[int]:
     """
     Given a list of deltas corresponding to input coins, create the "subtotals" list
     needed in solutions spending those coins.
@@ -78,7 +97,9 @@ def subtotals_for_deltas(deltas) -> List[int]:
 def next_info_for_spendable_cat(spendable_cat: SpendableCAT) -> Program:
     c = spendable_cat.coin
     list = [c.parent_coin_info, spendable_cat.inner_puzzle.get_tree_hash(), c.amount]
-    return Program.to(list)
+    # ignoring hint error here for:
+    # https://github.com/Apple-Network/clvm/pull/102
+    return Program.to(list)  # type: ignore[no-any-return]
 
 
 # This should probably return UnsignedSpendBundle if that type ever exists
@@ -91,16 +112,13 @@ def unsigned_spend_bundle_for_spendable_cats(mod_code: Program, spendable_cat_li
     N = len(spendable_cat_list)
 
     # figure out what the deltas are by running the inner puzzles & solutions
-    deltas = []
+    deltas: List[int] = []
     for spend_info in spendable_cat_list:
-        error, conditions, cost = conditions_dict_for_solution(
-            spend_info.inner_puzzle, spend_info.inner_solution, INFINITE_COST
-        )
+        conditions = conditions_dict_for_solution(spend_info.inner_puzzle, spend_info.inner_solution, INFINITE_COST)
         total = spend_info.extra_delta * -1
-        if conditions:
-            for _ in conditions.get(ConditionOpcode.CREATE_COIN, []):
-                if _.vars[1] != b"\x8f":  # -113 in bytes
-                    total += Program.to(_.vars[1]).as_int()
+        for _ in conditions.get(ConditionOpcode.CREATE_COIN, []):
+            if _.vars[1] != b"\x8f":  # -113 in bytes
+                total += Program.to(_.vars[1]).as_int()
         deltas.append(spend_info.coin.amount - total)
 
     if sum(deltas) != 0:

@@ -1,8 +1,10 @@
-from dataclasses import dataclass
-from typing import Optional, Any, List
+from __future__ import annotations
 
-from apple.types.blockchain_format.sized_bytes import bytes32
+from dataclasses import dataclass
+from typing import Any, List, Optional
+
 from apple.types.blockchain_format.program import Program
+from apple.types.blockchain_format.sized_bytes import bytes32
 from apple.util.ints import uint64
 from apple.util.streamable import Streamable, streamable
 

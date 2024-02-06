@@ -1,29 +1,32 @@
+from __future__ import annotations
+
 import logging
-from typing import Tuple, List, Optional
-from blspy import G1Element
+from typing import List, Optional, Tuple
+
+from chia_rs import G1Element
 from clvm.casts import int_from_bytes, int_to_bytes
 
 from apple.clvm.singleton import SINGLETON_LAUNCHER
 from apple.consensus.block_rewards import calculate_pool_reward
 from apple.consensus.coinbase import pool_parent_id
-from apple.pools.pool_wallet_info import PoolState, LEAVING_POOL, SELF_POOLING
-
+from apple.pools.pool_wallet_info import LEAVING_POOL, SELF_POOLING, PoolState
 from apple.types.blockchain_format.coin import Coin
-from apple.types.blockchain_format.program import Program, SerializedProgram
-
+from apple.types.blockchain_format.program import Program
+from apple.types.blockchain_format.serialized_program import SerializedProgram
 from apple.types.blockchain_format.sized_bytes import bytes32
-from apple.types.coin_spend import CoinSpend
-from apple.wallet.puzzles.load_clvm import load_clvm
-from apple.wallet.puzzles.singleton_top_layer import puzzle_for_singleton
-
+from apple.types.coin_spend import CoinSpend, compute_additions
 from apple.util.ints import uint32, uint64
+from apple.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
+from apple.wallet.puzzles.singleton_top_layer import puzzle_for_singleton
 
 log = logging.getLogger(__name__)
 # "Full" is the outer singleton, with the inner puzzle filled in
-SINGLETON_MOD = load_clvm("singleton_top_layer.clvm")
-POOL_WAITING_ROOM_MOD = load_clvm("pool_waitingroom_innerpuz.clvm")
-POOL_MEMBER_MOD = load_clvm("pool_member_innerpuz.clvm")
-P2_SINGLETON_MOD = load_clvm("p2_singleton_or_delayed_puzhash.clvm")
+SINGLETON_MOD = load_clvm_maybe_recompile("singleton_top_layer.clsp")
+POOL_WAITING_ROOM_MOD = load_clvm_maybe_recompile(
+    "pool_waitingroom_innerpuz.clsp", package_or_requirement="apple.pools.puzzles"
+)
+POOL_MEMBER_MOD = load_clvm_maybe_recompile("pool_member_innerpuz.clsp", package_or_requirement="apple.pools.puzzles")
+P2_SINGLETON_MOD = load_clvm_maybe_recompile("p2_singleton_or_delayed_puzhash.clsp")
 POOL_OUTER_MOD = SINGLETON_MOD
 
 POOL_MEMBER_HASH = POOL_MEMBER_MOD.get_tree_hash()
@@ -113,7 +116,7 @@ def get_delayed_puz_info_from_launcher_spend(coinsol: CoinSpend) -> Tuple[uint64
 ######################################
 
 
-def get_template_singleton_inner_puzzle(inner_puzzle: Program):
+def get_template_singleton_inner_puzzle(inner_puzzle: Program) -> Program:
     r = inner_puzzle.uncurry()
     if r is None:
         return False
@@ -282,7 +285,7 @@ def create_absorb_spend(
 
 
 def get_most_recent_singleton_coin_from_coin_spend(coin_sol: CoinSpend) -> Optional[Coin]:
-    additions: List[Coin] = coin_sol.additions()
+    additions: List[Coin] = compute_additions(coin_sol)
     for coin in additions:
         if coin.amount % 2 == 1:
             return coin
@@ -306,7 +309,9 @@ def get_pubkey_from_member_inner_puzzle(inner_puzzle: Program) -> G1Element:
     return pubkey
 
 
-def uncurry_pool_member_inner_puzzle(inner_puzzle: Program):  # -> Optional[Tuple[Program, Program, Program]]:
+def uncurry_pool_member_inner_puzzle(
+    inner_puzzle: Program,
+) -> Tuple[Program, Program, Program, Program, Program, Program]:
     """
     Take a puzzle and return `None` if it's not a "pool member" inner puzzle, or
     a triple of `mod_hash, relative_lock_height, pubkey` if it is.
@@ -349,7 +354,10 @@ def get_inner_puzzle_from_puzzle(full_puzzle: Program) -> Optional[Program]:
     _, inner_puzzle = list(args.as_iter())
     if not is_pool_singleton_inner_puzzle(inner_puzzle):
         return None
-    return inner_puzzle
+    # ignoring hint error here for:
+    # https://github.com/Apple-Network/clvm/pull/102
+    # https://github.com/Apple-Network/clvm/pull/106
+    return inner_puzzle  # type: ignore[no-any-return]
 
 
 def pool_state_from_extra_data(extra_data: Program) -> Optional[PoolState]:
@@ -388,7 +396,7 @@ def solution_to_pool_state(full_spend: CoinSpend) -> Optional[PoolState]:
         if inner_solution.rest().first().as_int() != 0:
             return None
 
-        # This is referred to as p1 in the applelisp code
+        # This is referred to as p1 in the chialisp code
         # spend_type is absorbing money if p1 is a cons box, spend_type is escape if p1 is an atom
         # TODO: The comment above, and in the CLVM, seems wrong
         extra_data = inner_solution.first()
@@ -416,7 +424,7 @@ def pool_state_to_inner_puzzle(
         delay_time,
         delay_ph,
     )
-    if pool_state.state in [LEAVING_POOL, SELF_POOLING]:
+    if pool_state.state in [LEAVING_POOL.value, SELF_POOLING.value]:
         return escaping_inner_puzzle
     else:
         return create_pooling_inner_puzzle(
